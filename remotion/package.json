@@ -1,0 +1,22 @@
+{
+  "name": "sideroom-hero-video",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "studio": "remotion studio src/Root.tsx",
+    "render": "remotion render src/Root.tsx HeroVideo --output=../public/party-video.mp4",
+    "preview": "remotion preview src/Root.tsx"
+  },
+  "dependencies": {
+    "@remotion/cli": "^4",
+    "@remotion/google-fonts": "^4",
+    "facehash": "^0.1.0",
+    "react": "^19",
+    "react-dom": "^19",
+    "remotion": "^4"
+  },
+  "devDependencies": {
+    "@types/react": "^19",
+    "typescript": "^5"
+  }
+}

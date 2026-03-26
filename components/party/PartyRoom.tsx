@@ -1,0 +1,193 @@
+"use client";
+
+import { useRealtimeChannel } from "@/hooks/useRealtimeChannel";
+import { usePlaybackSync } from "@/hooks/usePlaybackSync";
+import { usePartyChat } from "@/hooks/usePartyChat";
+import { useAlbumColors } from "@/hooks/useAlbumColors";
+import { useAudioAnalyser } from "@/hooks/useAudioAnalyser";
+import AudioPlayer from "./AudioPlayer";
+import LiveNoteButton from "./LiveNoteButton";
+import ArtworkOverlay from "./ArtworkOverlay";
+import ArtworkAura from "./ArtworkAura";
+import PartyLayout from "./PartyLayout";
+import PartyWebGLBackground from "./PartyWebGLBackground";
+import CountdownOverlay from "./CountdownOverlay";
+import PartyEndedOverlay from "./PartyEndedOverlay";
+import { Party, PlaybackState, Track } from "@/types";
+import { useCallback, useState } from "react";
+
+interface PartyRoomProps {
+  party: Party;
+  tracks: Track[];
+  isArtist: boolean;
+  guestName: string;
+  avatarUrl?: string | null;
+  seatId: string;
+  coverImageUrl?: string | null;
+  initialPlaybackState?: PlaybackState | null;
+}
+
+export default function PartyRoom({
+  party,
+  tracks,
+  isArtist,
+  guestName,
+  avatarUrl,
+  seatId,
+  coverImageUrl,
+  initialPlaybackState,
+}: PartyRoomProps) {
+  const { channel, presenceState: realPresence, isConnected } = useRealtimeChannel(
+    party.id,
+    guestName,
+    avatarUrl
+  );
+
+  const {
+    audioRef,
+    preloadAudioRef,
+    swapCount,
+    isPlaying,
+    currentTime,
+    duration,
+    currentTrack,
+    currentTrackPosition,
+    totalTracks,
+    needsInteraction,
+    play,
+    pause,
+    playTrack,
+    resumeFromInteraction,
+    partyEnded,
+    endParty,
+  } = usePlaybackSync({ channel, isArtist, tracks, partyId: party.id, initialPlaybackState, isConnected });
+
+  const { messages, sendMessage } = usePartyChat({
+    channel,
+    partyId: party.id,
+    seatId,
+    senderName: guestName,
+  });
+
+  const [isLoadingPlay, setIsLoadingPlay] = useState(false);
+
+  const handlePlay = useCallback(async () => {
+    setIsLoadingPlay(true);
+    try {
+      await play();
+    } finally {
+      setIsLoadingPlay(false);
+    }
+  }, [play]);
+
+  const themeGradientColors = party.theme
+    ? { primary: party.theme.bg, secondary: party.theme.accent }
+    : { primary: "#0c51da", secondary: "#4a9aff" };
+
+  const colors = useAlbumColors(coverImageUrl ?? null, themeGradientColors);
+  const { amplitudeRef } = useAudioAnalyser({ audioRef, isPlaying, swapCount });
+
+  const statusBadge = isConnected ? (
+    <div className="flex items-center gap-1.5">
+      <div className="w-2 h-2 rounded-full bg-emerald-500" />
+      <span className="text-xs text-[var(--party-fg)]/60">Connected</span>
+    </div>
+  ) : (
+    <div className="flex items-center gap-1.5">
+      <div className="w-2 h-2 rounded-full bg-yellow-500 animate-pulse" />
+      <span className="text-xs text-[var(--party-fg)]/60">Connecting...</span>
+    </div>
+  );
+
+  return (
+    <PartyLayout
+      theme={{
+        bg: party.theme?.bg ?? "#0c51da",
+        fg: party.theme?.fg ?? "#ffffff",
+        accent: party.theme?.accent ?? "#4a9aff",
+        surface: party.theme?.surface ?? "#0a3fa8",
+        font: party.theme?.font,
+      }}
+      title={party.title}
+      description={party.description}
+      tracks={tracks}
+      statusBadge={statusBadge}
+      headerActions={
+        isArtist && !partyEnded ? (
+          <button
+            onClick={endParty}
+            className="text-xs px-3 py-1.5 rounded-md bg-red-500/20 text-red-400 hover:bg-red-500/30 transition-colors"
+          >
+            End Party
+          </button>
+        ) : undefined
+      }
+      seats={realPresence}
+      seatLimit={party.seat_limit}
+      artistName={guestName}
+      chatMessages={messages}
+      onSendMessage={sendMessage}
+      currentUserName={guestName}
+      backgroundLayer={null}
+      overlayLayer={
+        <>
+          <CountdownOverlay scheduledAt={party.scheduled_at} />
+          {partyEnded && (
+            <PartyEndedOverlay
+              partyId={party.id}
+              isArtist={isArtist}
+              guestName={guestName}
+            />
+          )}
+        </>
+      }
+    >
+      <div className="relative">
+        <ArtworkAura
+          colors={colors.palette}
+          scale={2.2}
+          blur={50}
+          grain={0.35}
+          pulseSpeed={4}
+          amplitudeRef={amplitudeRef}
+        />
+        <ArtworkOverlay
+          coverImageUrl={coverImageUrl}
+          fallbackGradient={themeGradientColors}
+          title={party.title}
+          crossOrigin="anonymous"
+          showPlayOverlay={isArtist}
+          isPlaying={isPlaying}
+          isLoading={isLoadingPlay}
+          onTogglePlay={isPlaying ? pause : handlePlay}
+        />
+      </div>
+      <p className="text-base font-semibold tracking-tight text-center mt-4">
+        {currentTrack?.file_name ?? party.file_name}
+      </p>
+      <div className="w-full max-w-sm mt-3">
+        <AudioPlayer
+          audioRef={audioRef}
+          preloadAudioRef={preloadAudioRef}
+          isPlaying={isPlaying}
+          currentTime={currentTime}
+          duration={duration}
+          isArtist={isArtist}
+          onPlay={handlePlay}
+          onPause={pause}
+          needsInteraction={needsInteraction}
+          onResume={resumeFromInteraction}
+        />
+      </div>
+      {!partyEnded && (
+        <div className="w-full max-w-sm mt-2">
+          <LiveNoteButton
+            partyId={party.id}
+            trackId={currentTrack?.id ?? null}
+            currentTime={currentTime}
+          />
+        </div>
+      )}
+    </PartyLayout>
+  );
+}

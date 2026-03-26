@@ -1,0 +1,1 @@
+ALTER TABLE parties ADD COLUMN playback_state JSONB DEFAULT NULL;
