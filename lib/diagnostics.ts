@@ -45,8 +45,36 @@ function emptyCounters(): DiagCounters {
   };
 }
 
-let counters = emptyCounters();
+let counters = emptyCounters(); // 30s rolling window — feeds the console summary
+const totals = emptyCounters(); // cumulative, never reset — feeds the on-screen overlay
+let lastDrift = 0;
+let lastAction = "—";
 let summaryTimer: ReturnType<typeof setInterval> | null = null;
+
+export interface DiagEvent {
+  t: number; // seconds since page load
+  line: string;
+}
+
+const recentEvents: DiagEvent[] = [];
+const MAX_EVENTS = 12;
+
+export interface DiagSnapshot {
+  totals: DiagCounters;
+  lastDrift: number;
+  lastAction: string;
+  recentEvents: DiagEvent[];
+}
+
+/** Current cumulative diagnostic state — read by the on-screen DebugOverlay. */
+export function getDiagSnapshot(): DiagSnapshot {
+  return {
+    totals: { ...totals },
+    lastDrift,
+    lastAction,
+    recentEvents: recentEvents.slice(),
+  };
+}
 
 export const diag = {
   enabled: flags.debug,
@@ -54,28 +82,38 @@ export const diag = {
 
   log(category: string, event: string, data?: Record<string, unknown>): void {
     if (!flags.debug) return;
-    const t = (performance.now() / 1000).toFixed(2);
-    console.log(`[diag:${category}] +${t}s ${event}`, data ?? "");
+    const t = performance.now() / 1000;
+    console.log(`[diag:${category}] +${t.toFixed(2)}s ${event}`, data ?? "");
+    const dataStr = data ? " " + JSON.stringify(data) : "";
+    recentEvents.push({ t, line: `${category} ${event}${dataStr}` });
+    if (recentEvents.length > MAX_EVENTS) recentEvents.shift();
   },
 
   recordHeartbeat(driftAbs: number, action: "none" | "nudge" | "seek"): void {
     if (!flags.debug) return;
-    counters.heartbeats += 1;
-    counters.driftSum += driftAbs;
-    counters.driftMax = Math.max(counters.driftMax, driftAbs);
-    if (action === "seek") counters.seeks += 1;
-    if (action === "nudge") counters.nudges += 1;
+    for (const c of [counters, totals]) {
+      c.heartbeats += 1;
+      c.driftSum += driftAbs;
+      c.driftMax = Math.max(c.driftMax, driftAbs);
+      if (action === "seek") c.seeks += 1;
+      if (action === "nudge") c.nudges += 1;
+    }
+    lastDrift = driftAbs;
+    lastAction = action;
   },
 
   recordStall(durationMs: number): void {
     if (!flags.debug) return;
-    counters.stalls += 1;
-    counters.stallMsTotal += durationMs;
+    for (const c of [counters, totals]) {
+      c.stalls += 1;
+      c.stallMsTotal += durationMs;
+    }
   },
 
   recordJankFrame(): void {
     if (!flags.debug) return;
     counters.jankFrames += 1;
+    totals.jankFrames += 1;
   },
 };
 

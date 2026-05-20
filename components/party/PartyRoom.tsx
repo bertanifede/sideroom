@@ -12,6 +12,7 @@ import ArtworkAura from "./ArtworkAura";
 import PartyLayout from "./PartyLayout";
 import CountdownOverlay from "./CountdownOverlay";
 import PartyEndedOverlay from "./PartyEndedOverlay";
+import DebugOverlay from "./DebugOverlay";
 import { Party, PlaybackState, Track } from "@/types";
 import { useCallback, useEffect, useState } from "react";
 import { useCoarsePointer } from "@/hooks/useCoarsePointer";
@@ -154,6 +155,7 @@ export default function PartyRoom({
               guestName={guestName}
             />
           )}
+          {diag.enabled && <DebugOverlay audioRef={audioRef} />}
         </>
       }
     >
