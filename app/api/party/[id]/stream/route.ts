@@ -13,6 +13,8 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const tStart = Date.now();
+    const debugStream = process.env.DEBUG_STREAM === "1";
     const { id } = await params;
     const supabase = await createServiceClient();
 
@@ -141,6 +143,19 @@ export async function GET(
     if (contentRange) responseHeaders.set("Content-Range", contentRange);
 
     responseHeaders.set("Accept-Ranges", "bytes");
+
+    if (debugStream) {
+      console.log(
+        "[stream]",
+        JSON.stringify({
+          party: id,
+          track: trackPosition,
+          range: rangeHeader ?? "none",
+          status: upstream.status,
+          totalMs: Date.now() - tStart,
+        })
+      );
+    }
 
     return new Response(upstream.body, {
       status: upstream.status, // 200 for full, 206 for range
