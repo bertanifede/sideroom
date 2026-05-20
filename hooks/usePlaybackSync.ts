@@ -87,7 +87,7 @@ export function usePlaybackSync({
       channel.send({
         type: "broadcast",
         event: "playback",
-        payload: event,
+        payload: { ...event, sentAt: Date.now() },
       });
     },
     [channel]
@@ -407,11 +407,15 @@ export function usePlaybackSync({
             }
           }
 
-          const drift = Math.abs(audio.currentTime - event.position);
-          if (drift > 2) {
+          const delta = event.position - audio.currentTime;
+          const correction = decideCorrection(delta);
+          if (correction.action === "seek") {
             audio.currentTime = event.position;
-          } else if (drift > 0.3) {
-            audio.currentTime = event.position;
+            audio.playbackRate = 1;
+          } else if (correction.action === "nudge") {
+            audio.playbackRate = correction.playbackRate;
+          } else if (audio.playbackRate !== 1) {
+            audio.playbackRate = 1;
           }
           break;
         }

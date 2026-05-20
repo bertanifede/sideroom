@@ -99,6 +99,7 @@ function createMockAudio() {
     load: vi.fn(),
     preload: "",
     crossOrigin: null,
+    playbackRate: 1,
   } as unknown as HTMLAudioElement;
 }
 
@@ -266,7 +267,7 @@ describe("usePlaybackSync hook", () => {
     expect(audio.src).toBe("/api/party/p1/stream?track=2");
   });
 
-  it("guest HEARTBEAT: corrects currentTime on drift > 2s", async () => {
+  it("guest HEARTBEAT: hard-seeks when drift exceeds the seek threshold", async () => {
     const channel = createMockChannel();
     const audio = createMockAudio();
     audio.src = "https://cdn.example.com/stream.mp3";
@@ -285,11 +286,69 @@ describe("usePlaybackSync hook", () => {
 
     await act(async () => {
       channel._trigger({
-        payload: { type: "HEARTBEAT", position: 55, track_position: 1, is_playing: true },
+        payload: { type: "HEARTBEAT", position: 100, track_position: 1, is_playing: true },
       });
     });
 
-    expect(audio.currentTime).toBe(55);
+    // delta = 100 - 50 = 50 → seek
+    expect(audio.currentTime).toBe(100);
+    expect(audio.playbackRate).toBe(1);
+  });
+
+  it("guest HEARTBEAT: nudges playbackRate (no seek) for moderate drift", async () => {
+    const channel = createMockChannel();
+    const audio = createMockAudio();
+    audio.src = "https://cdn.example.com/stream.mp3";
+    (audio as unknown as { currentTime: number }).currentTime = 50;
+
+    renderWithAudio(audio, {
+      channel: channel as AnyChannel,
+      isArtist: false,
+      tracks: baseTracks,
+      partyId: "p1",
+      initialPlaybackState: null,
+      isConnected: true,
+    });
+
+    await act(async () => {});
+
+    await act(async () => {
+      channel._trigger({
+        payload: { type: "HEARTBEAT", position: 53.5, track_position: 1, is_playing: true },
+      });
+    });
+
+    // delta = 53.5 - 50 = 3.5 → nudge, currentTime untouched
+    expect(audio.currentTime).toBe(50);
+    expect(audio.playbackRate).toBe(1.03);
+  });
+
+  it("guest HEARTBEAT: leaves playback untouched within the dead zone", async () => {
+    const channel = createMockChannel();
+    const audio = createMockAudio();
+    audio.src = "https://cdn.example.com/stream.mp3";
+    (audio as unknown as { currentTime: number }).currentTime = 50;
+
+    renderWithAudio(audio, {
+      channel: channel as AnyChannel,
+      isArtist: false,
+      tracks: baseTracks,
+      partyId: "p1",
+      initialPlaybackState: null,
+      isConnected: true,
+    });
+
+    await act(async () => {});
+
+    await act(async () => {
+      channel._trigger({
+        payload: { type: "HEARTBEAT", position: 51, track_position: 1, is_playing: true },
+      });
+    });
+
+    // delta = 1 → dead zone, no change
+    expect(audio.currentTime).toBe(50);
+    expect(audio.playbackRate).toBe(1);
   });
 
   it("guest HEARTBEAT: resumes play when artist is_playing but audio is paused", async () => {
