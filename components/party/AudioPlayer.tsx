@@ -1,10 +1,11 @@
 "use client";
 
-import { RefObject, useEffect } from "react";
+import { RefObject, useEffect, useState } from "react";
 
 interface AudioPlayerProps {
   audioRef: RefObject<HTMLAudioElement | null>;
   preloadAudioRef?: RefObject<HTMLAudioElement | null>;
+  swapCount?: number;
   isPlaying: boolean;
   currentTime: number;
   duration: number;
@@ -28,6 +29,7 @@ function formatTime(seconds: number): string {
 export default function AudioPlayer({
   audioRef,
   preloadAudioRef,
+  swapCount,
   isPlaying,
   currentTime,
   duration,
@@ -49,6 +51,23 @@ export default function AudioPlayer({
       (el as HTMLAudioElement & { webkitPreservesPitch?: boolean }).webkitPreservesPitch = true;
     }
   }, [audioRef, preloadAudioRef]);
+
+  const [isBuffering, setIsBuffering] = useState(false);
+
+  useEffect(() => {
+    const audio = audioRef.current;
+    if (!audio) return;
+    const onWaiting = () => setIsBuffering(true);
+    const onResumed = () => setIsBuffering(false);
+    audio.addEventListener("waiting", onWaiting);
+    audio.addEventListener("playing", onResumed);
+    audio.addEventListener("canplay", onResumed);
+    return () => {
+      audio.removeEventListener("waiting", onWaiting);
+      audio.removeEventListener("playing", onResumed);
+      audio.removeEventListener("canplay", onResumed);
+    };
+  }, [audioRef, swapCount]);
 
   const hasMultipleTracks = (totalTracks ?? 0) > 1;
 
@@ -91,12 +110,20 @@ export default function AudioPlayer({
       )}
 
       {/* Guest: listening indicator */}
-      {!isArtist && isPlaying && !needsInteraction && (
+      {!isArtist && isPlaying && !needsInteraction && !isBuffering && (
         <div className="flex items-center justify-center mt-4 gap-1">
           <div className="w-1 h-3 bg-[var(--party-fg)] rounded-full animate-pulse" />
           <div className="w-1 h-4 bg-[var(--party-fg)] rounded-full animate-pulse delay-75" />
           <div className="w-1 h-2 bg-[var(--party-fg)] rounded-full animate-pulse delay-150" />
           <span className="text-xs text-[var(--party-fg)]/60 ml-2">Listening</span>
+        </div>
+      )}
+
+      {/* Buffering indicator */}
+      {isPlaying && isBuffering && (
+        <div className="flex items-center justify-center mt-4 gap-2">
+          <div className="w-3 h-3 rounded-full border-2 border-[var(--party-fg)]/30 border-t-[var(--party-fg)] animate-spin" />
+          <span className="text-xs text-[var(--party-fg)]/60">Buffering…</span>
         </div>
       )}
     </div>
