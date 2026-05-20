@@ -614,9 +614,27 @@ export function usePlaybackSync({
         // every client plays its own last track to its true end.
         setPlaybackFinished(true);
         if (isArtist) {
-          fetch(`/api/party/${partyId}/playback-ended`, { method: "POST" }).catch(
-            () => {}
-          );
+          // Persist the wind-down start. This timestamp drives partyLifecycle
+          // for clients that load later, so retry once on failure (network
+          // error OR non-2xx) rather than silently dropping it. The route is
+          // idempotent server-side, so the retry is safe.
+          void (async () => {
+            for (let attempt = 0; attempt < 2; attempt++) {
+              try {
+                const res = await fetch(
+                  `/api/party/${partyId}/playback-ended`,
+                  { method: "POST" }
+                );
+                if (res.ok) return;
+              } catch {
+                // network error — fall through to the retry
+              }
+              if (attempt === 0) {
+                await new Promise((r) => setTimeout(r, 2000));
+              }
+            }
+            diag.log("sync", "playback-ended-post-failed", { partyId });
+          })();
         }
       }
     };
@@ -703,6 +721,8 @@ export function usePlaybackSync({
   // End Party, treat the party as ended after WIND_DOWN_CAP_MS.
   useEffect(() => {
     if (!playbackFinished || partyEnded) return;
+    // On the host whose track just finished, playbackEndedAt (a server prop) is
+    // still null until a refetch/remount, so anchor the cap to now() this session.
     const startedAt = playbackEndedAt
       ? new Date(playbackEndedAt).getTime()
       : Date.now();
