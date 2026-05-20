@@ -363,6 +363,9 @@ export function usePlaybackSync({
         case "PAUSE": {
           audio.pause();
           audio.currentTime = event.position;
+          // Clear any in-progress sync nudge — no heartbeats arrive while
+          // paused, so a stuck playbackRate would not self-correct.
+          audio.playbackRate = 1;
           setIsPlaying(false);
           break;
         }
