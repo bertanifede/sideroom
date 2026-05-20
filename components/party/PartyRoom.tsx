@@ -202,7 +202,7 @@ export default function PartyRoom({
         />
       </div>
       {playbackFinished && !partyEnded && (
-        <p className="text-sm text-[var(--party-fg)]/60 text-center mt-3 max-w-sm">
+        <p role="status" className="text-sm text-[var(--party-fg)]/60 text-center mt-3 w-full max-w-sm">
           {isArtist
             ? "All tracks played — guests can still chat. Tap End Party when you're ready."
             : "The set has finished — say goodbye in chat."}

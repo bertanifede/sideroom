@@ -43,6 +43,7 @@ export default function ArtworkOverlay({
       )}
       {showPlayOverlay && playbackFinished && (
         <div
+          role="status"
           className="absolute inset-0 flex items-center justify-center rounded-2xl text-center px-4"
           style={{ backgroundColor: "rgba(0,0,0,0.45)" }}
         >
