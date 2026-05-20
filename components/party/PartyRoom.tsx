@@ -10,7 +10,6 @@ import LiveNoteButton from "./LiveNoteButton";
 import ArtworkOverlay from "./ArtworkOverlay";
 import ArtworkAura from "./ArtworkAura";
 import PartyLayout from "./PartyLayout";
-import PartyWebGLBackground from "./PartyWebGLBackground";
 import CountdownOverlay from "./CountdownOverlay";
 import PartyEndedOverlay from "./PartyEndedOverlay";
 import { Party, PlaybackState, Track } from "@/types";
