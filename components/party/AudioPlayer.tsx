@@ -1,6 +1,6 @@
 "use client";
 
-import { RefObject } from "react";
+import { RefObject, useEffect } from "react";
 
 interface AudioPlayerProps {
   audioRef: RefObject<HTMLAudioElement | null>;
@@ -40,6 +40,16 @@ export default function AudioPlayer({
   needsInteraction,
   onResume,
 }: AudioPlayerProps) {
+  // Keep pitch stable when playbackRate is nudged for sync correction.
+  useEffect(() => {
+    for (const ref of [audioRef, preloadAudioRef]) {
+      const el = ref?.current;
+      if (!el) continue;
+      el.preservesPitch = true;
+      (el as HTMLAudioElement & { webkitPreservesPitch?: boolean }).webkitPreservesPitch = true;
+    }
+  }, [audioRef, preloadAudioRef]);
+
   const hasMultipleTracks = (totalTracks ?? 0) > 1;
 
   return (
