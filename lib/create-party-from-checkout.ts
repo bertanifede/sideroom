@@ -142,6 +142,9 @@ export async function createPartyFromCheckout(
   }
 
   // 7. Store the PIN hash in the secrets table.
+  // A failure here is deliberately non-fatal: the customer has paid, so the
+  // party must still be created. The party is left without its PIN (the
+  // artist can re-set it via the edit flow); we log loudly so it is noticed.
   if (pin_hash) {
     const { error: secretError } = await supabase
       .from("party_secrets")
@@ -169,7 +172,17 @@ export async function createPartyFromCheckout(
       .insert(trackRows);
     if (tracksError) {
       // Roll back the party so it is not left track-less.
-      await supabase.from("parties").delete().eq("id", party.id);
+      const { error: rollbackError } = await supabase
+        .from("parties")
+        .delete()
+        .eq("id", party.id);
+      if (rollbackError) {
+        console.error(
+          "createPartyFromCheckout: track insert failed AND party rollback failed; orphaned party",
+          party.id,
+          rollbackError.message
+        );
+      }
       throw new Error(`Track creation failed: ${tracksError.message}`);
     }
   }
