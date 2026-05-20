@@ -36,11 +36,12 @@ function DashboardLink({ label }: { label: string }) {
 function PaymentSuccessContent() {
   const searchParams = useSearchParams();
   const sessionId = searchParams.get("session_id");
-  const [status, setStatus] = useState<Status>("loading");
+  const [status, setStatus] = useState<Status>(() =>
+    searchParams.get("session_id") ? "loading" : "no_session"
+  );
 
   useEffect(() => {
     if (!sessionId) {
-      setStatus("no_session");
       return;
     }
 
