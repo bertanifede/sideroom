@@ -70,10 +70,10 @@ export interface PlaybackState {
 
 // Realtime event types
 export type PlaybackEvent =
-  | { type: "PLAY"; position: number; track_position: number }
-  | { type: "PAUSE"; position: number }
-  | { type: "SEEK"; position: number }
-  | { type: "HEARTBEAT"; position: number; track_position: number; is_playing: boolean };
+  | { type: "PLAY"; position: number; track_position: number; sentAt?: number }
+  | { type: "PAUSE"; position: number; sentAt?: number }
+  | { type: "SEEK"; position: number; sentAt?: number }
+  | { type: "HEARTBEAT"; position: number; track_position: number; is_playing: boolean; sentAt?: number };
 
 export type ChatEvent = {
   type: "CHAT";
