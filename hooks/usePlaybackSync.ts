@@ -521,13 +521,30 @@ export function usePlaybackSync({
         const seekTo = computeSeekPosition(state.position, state.updated_at, trackDur);
 
         // Switch track if needed
-        if (state.track_position !== currentTrackPositionRef.current || !audio.src) {
+        const trackChanged =
+          state.track_position !== currentTrackPositionRef.current || !audio.src;
+        if (trackChanged) {
           const url = getStreamProxyUrl(state.track_position);
           audio.src = url;
           setAudioUrl(url);
         }
 
-        audio.currentTime = seekTo;
+        if (trackChanged) {
+          // New src starts at 0 — seek directly to the recovered position.
+          audio.currentTime = seekTo;
+          audio.playbackRate = 1;
+        } else {
+          // Same track — three-band correction so a brief flap doesn't seek.
+          const correction = decideCorrection(seekTo - audio.currentTime);
+          if (correction.action === "seek") {
+            audio.currentTime = seekTo;
+            audio.playbackRate = 1;
+          } else if (correction.action === "nudge") {
+            audio.playbackRate = correction.playbackRate;
+          } else {
+            audio.playbackRate = 1;
+          }
+        }
         try {
           await audio.play();
           setIsPlaying(true);

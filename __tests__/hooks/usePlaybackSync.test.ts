@@ -635,6 +635,67 @@ describe("usePlaybackSync hook", () => {
       expect(audio.play).toHaveBeenCalledTimes(2);
     });
 
+  it("reconnection re-sync: nudges instead of seeking after a brief flap", async () => {
+    const channel = createMockChannel();
+    const audio = createMockAudio();
+    audio.src = "/api/party/p1/stream?track=1";
+    (audio as unknown as { currentTime: number }).currentTime = 30;
+
+    mockFetch.mockImplementation((url: unknown) => {
+      if (typeof url === "string" && url.includes("playback-state")) {
+        return Promise.resolve({
+          ok: true,
+          json: () =>
+            Promise.resolve({
+              playback_state: {
+                track_position: 1,
+                position: 33,
+                is_playing: true,
+                updated_at: new Date().toISOString(),
+              },
+            }),
+        });
+      }
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({}) });
+    });
+
+    const { rerender } = renderHook(
+      (props: Parameters<typeof usePlaybackSync>[0]) => {
+        const r = usePlaybackSync(props);
+        (r.audioRef as { current: HTMLAudioElement }).current = audio;
+        return r;
+      },
+      {
+        initialProps: {
+          channel: channel as AnyChannel,
+          isArtist: false,
+          tracks: baseTracks,
+          partyId: "p1",
+          initialPlaybackState: null,
+          isConnected: false,
+        },
+      }
+    );
+
+    await act(async () => {});
+
+    await act(async () => {
+      rerender({
+        channel: channel as AnyChannel,
+        isArtist: false,
+        tracks: baseTracks,
+        partyId: "p1",
+        initialPlaybackState: null,
+        isConnected: true,
+      });
+    });
+    await act(async () => {});
+
+    // delta = 33 - 30 = 3 → nudge; currentTime unchanged
+    expect(audio.currentTime).toBe(30);
+    expect(audio.playbackRate).toBe(1.03);
+  });
+
     it("resumeFromInteraction sets proxy URL when src was never set", async () => {
       const channel = createMockChannel();
       const audio = createMockAudio();
