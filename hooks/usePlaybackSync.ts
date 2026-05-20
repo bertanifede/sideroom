@@ -94,6 +94,7 @@ export function usePlaybackSync({
   const recoveryAttemptedRef = useRef(false);
   const recoveryCompleteRef = useRef(false);
   const currentTrackPositionRef = useRef(currentTrackPosition);
+  const errorTimestampsRef = useRef<number[]>([]);
 
   const totalTracks = tracks.length;
   const currentTrack = tracks.find((t) => t.position === currentTrackPosition) ?? null;
@@ -613,9 +614,20 @@ export function usePlaybackSync({
       }
     };
 
-    // Re-set proxy URL on error (proxy generates fresh signed URL each request)
+    // On error: retry the proxy URL within budget, then give up instead of
+    // looping. The proxy mints a fresh signed URL on each request.
     const onError = async () => {
       if (!audio.src) return;
+
+      const now = Date.now();
+      errorTimestampsRef.current.push(now);
+
+      if (!shouldRetryAfterError(errorTimestampsRef.current, now)) {
+        // Retry budget exhausted — stop the reload loop, surface to the user.
+        setNeedsInteraction(true);
+        return;
+      }
+
       const savedTime = audio.currentTime;
       const wasPlaying = !audio.paused;
 
@@ -634,16 +646,23 @@ export function usePlaybackSync({
       }
     };
 
+    // A clean resume clears the error budget.
+    const onPlaying = () => {
+      errorTimestampsRef.current = [];
+    };
+
     audio.addEventListener("timeupdate", onTimeUpdate);
     audio.addEventListener("durationchange", onDurationChange);
     audio.addEventListener("ended", onEnded);
     audio.addEventListener("error", onError);
+    audio.addEventListener("playing", onPlaying);
 
     return () => {
       audio.removeEventListener("timeupdate", onTimeUpdate);
       audio.removeEventListener("durationchange", onDurationChange);
       audio.removeEventListener("ended", onEnded);
       audio.removeEventListener("error", onError);
+      audio.removeEventListener("playing", onPlaying);
     };
   }, [isArtist, currentTrackPosition, totalTracks, playTrack, persistState, getStreamProxyUrl, swapCount]);
 
