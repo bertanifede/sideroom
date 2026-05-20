@@ -45,6 +45,7 @@ parties
   seat_limit (INT, 1–50, default 10)
   scheduled_at (TIMESTAMPTZ)
   ended_at (TIMESTAMPTZ, nullable)
+  playback_ended_at (TIMESTAMPTZ, nullable) — when the last track finished; the party then stays open for chat/notes until the host ends it
   files_deleted (BOOLEAN)
   payment_status (TEXT: pending | paid | refunded)
   file_path (TEXT) — path in Supabase Storage
@@ -140,8 +141,11 @@ Supabase Realtime Presence tracks connected guests. When a guest subscribes to t
 ### Deletion Lifecycle
 ```
 Party created → files uploaded
-Party ends → ended_at set (or auto-set at scheduled_at + 6h)
-+48 hours → Vercel cron deletes files from storage, sets files_deleted = true
+Last track finishes → wind-down: room stays open for chat/notes, playback_ended_at set, no audio cut off
+Host taps End Party → ended_at set
+  (if untouched: treated as ended 1h after wind-down, or 6h after scheduled_at)
++48 hours after the end (ended_at, or scheduled_at when never ended) →
+  Vercel cron deletes files from storage, sets files_deleted = true
 → Artist receives deletion confirmation email
 ```
 
