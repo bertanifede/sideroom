@@ -17,6 +17,33 @@ export function computeSeekPosition(
     : position + elapsed;
 }
 
+/** Sync correction tuning — see spec P0b. */
+const SYNC_DEAD_ZONE_SEC = 2;
+const SYNC_SEEK_THRESHOLD_SEC = 5;
+const NUDGE_RATE_FASTER = 1.03;
+const NUDGE_RATE_SLOWER = 0.97;
+
+/**
+ * Pure decision for guest drift correction.
+ * `delta` = artist position − guest position (positive ⇒ guest is behind).
+ */
+export function decideCorrection(delta: number): {
+  action: "none" | "nudge" | "seek";
+  playbackRate: number;
+} {
+  const magnitude = Math.abs(delta);
+  if (magnitude <= SYNC_DEAD_ZONE_SEC) {
+    return { action: "none", playbackRate: 1 };
+  }
+  if (magnitude <= SYNC_SEEK_THRESHOLD_SEC) {
+    return {
+      action: "nudge",
+      playbackRate: delta > 0 ? NUDGE_RATE_FASTER : NUDGE_RATE_SLOWER,
+    };
+  }
+  return { action: "seek", playbackRate: 1 };
+}
+
 interface UsePlaybackSyncProps {
   channel: RealtimeChannel | null;
   isArtist: boolean;

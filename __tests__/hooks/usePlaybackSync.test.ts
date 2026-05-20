@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { renderHook, act, waitFor } from "@testing-library/react";
-import { usePlaybackSync, computeSeekPosition } from "@/hooks/usePlaybackSync";
+import { usePlaybackSync, computeSeekPosition, decideCorrection } from "@/hooks/usePlaybackSync";
 import type { Track, PlaybackState } from "@/types";
 
 // Mock fetch globally
@@ -40,6 +40,30 @@ describe("computeSeekPosition", () => {
     // 100 + ~10 ≈ 110, no cap
     expect(result).toBeGreaterThanOrEqual(109);
     expect(result).toBeLessThanOrEqual(111);
+  });
+});
+
+describe("decideCorrection", () => {
+  it("returns 'none' with rate 1 when |delta| is within the dead zone", () => {
+    expect(decideCorrection(0)).toEqual({ action: "none", playbackRate: 1 });
+    expect(decideCorrection(1.5)).toEqual({ action: "none", playbackRate: 1 });
+    expect(decideCorrection(-1.5)).toEqual({ action: "none", playbackRate: 1 });
+    expect(decideCorrection(2)).toEqual({ action: "none", playbackRate: 1 });
+  });
+
+  it("nudges faster (1.03) when the guest is behind (positive delta)", () => {
+    expect(decideCorrection(3)).toEqual({ action: "nudge", playbackRate: 1.03 });
+    expect(decideCorrection(5)).toEqual({ action: "nudge", playbackRate: 1.03 });
+  });
+
+  it("nudges slower (0.97) when the guest is ahead (negative delta)", () => {
+    expect(decideCorrection(-3)).toEqual({ action: "nudge", playbackRate: 0.97 });
+    expect(decideCorrection(-5)).toEqual({ action: "nudge", playbackRate: 0.97 });
+  });
+
+  it("seeks when |delta| exceeds the seek threshold", () => {
+    expect(decideCorrection(6)).toEqual({ action: "seek", playbackRate: 1 });
+    expect(decideCorrection(-10)).toEqual({ action: "seek", playbackRate: 1 });
   });
 });
 
