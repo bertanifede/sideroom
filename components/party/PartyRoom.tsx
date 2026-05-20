@@ -13,7 +13,11 @@ import PartyLayout from "./PartyLayout";
 import CountdownOverlay from "./CountdownOverlay";
 import PartyEndedOverlay from "./PartyEndedOverlay";
 import { Party, PlaybackState, Track } from "@/types";
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
+import { useCoarsePointer } from "@/hooks/useCoarsePointer";
+import { useFrameHealth } from "@/hooks/useFrameHealth";
+import { useAudioDiagnostics } from "@/hooks/useAudioDiagnostics";
+import { diag, initDiagnostics } from "@/lib/diagnostics";
 
 interface PartyRoomProps {
   party: Party;
@@ -84,7 +88,19 @@ export default function PartyRoom({
     : { primary: "#0c51da", secondary: "#4a9aff" };
 
   const colors = useAlbumColors(coverImageUrl ?? null, themeGradientColors);
-  const { amplitudeRef } = useAudioAnalyser({ audioRef, isPlaying, swapCount });
+  const isCoarsePointer = useCoarsePointer();
+  const { amplitudeRef } = useAudioAnalyser({
+    audioRef,
+    isPlaying,
+    swapCount,
+    enabled: !isCoarsePointer && !diag.flags.noAnalyser,
+  });
+
+  useFrameHealth();
+  useAudioDiagnostics(audioRef, swapCount);
+  useEffect(() => {
+    initDiagnostics();
+  }, []);
 
   const statusBadge = isConnected ? (
     <div className="flex items-center gap-1.5">
@@ -142,14 +158,16 @@ export default function PartyRoom({
       }
     >
       <div className="relative">
-        <ArtworkAura
-          colors={colors.palette}
-          scale={2.2}
-          blur={50}
-          grain={0.35}
-          pulseSpeed={4}
-          amplitudeRef={amplitudeRef}
-        />
+        {!isCoarsePointer && (
+          <ArtworkAura
+            colors={colors.palette}
+            scale={2.2}
+            blur={50}
+            grain={0.35}
+            pulseSpeed={4}
+            amplitudeRef={amplitudeRef}
+          />
+        )}
         <ArtworkOverlay
           coverImageUrl={coverImageUrl}
           fallbackGradient={themeGradientColors}
@@ -168,6 +186,7 @@ export default function PartyRoom({
         <AudioPlayer
           audioRef={audioRef}
           preloadAudioRef={preloadAudioRef}
+          swapCount={swapCount}
           isPlaying={isPlaying}
           currentTime={currentTime}
           duration={duration}
