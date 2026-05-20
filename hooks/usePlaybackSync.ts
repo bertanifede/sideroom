@@ -4,6 +4,7 @@ import { useEffect, useRef, useCallback, useState } from "react";
 import { RealtimeChannel } from "@supabase/supabase-js";
 import { PlaybackEvent, PlaybackState, Track } from "@/types";
 import { diag } from "@/lib/diagnostics";
+import { WIND_DOWN_CAP_MS } from "@/lib/party-lifecycle";
 
 /** Pure function: compute where to seek given persisted state + elapsed time */
 export function computeSeekPosition(
@@ -62,6 +63,7 @@ interface UsePlaybackSyncProps {
   partyId: string;
   initialPlaybackState?: PlaybackState | null;
   isConnected?: boolean;
+  playbackEndedAt?: string | null;
 }
 
 export function usePlaybackSync({
@@ -71,6 +73,7 @@ export function usePlaybackSync({
   partyId,
   initialPlaybackState,
   isConnected = false,
+  playbackEndedAt,
 }: UsePlaybackSyncProps) {
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const preloadAudioRef = useRef<HTMLAudioElement | null>(null);
@@ -82,6 +85,7 @@ export function usePlaybackSync({
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
   const [currentTrackPosition, setCurrentTrackPosition] = useState(1);
   const [needsInteraction, setNeedsInteraction] = useState(false);
+  const [playbackFinished, setPlaybackFinished] = useState(!!playbackEndedAt);
   const heartbeatRef = useRef<NodeJS.Timeout | null>(null);
   const persistTimerRef = useRef<NodeJS.Timeout | null>(null);
   const recoveryAttemptedRef = useRef(false);
@@ -601,13 +605,18 @@ export function usePlaybackSync({
     const onEnded = () => {
       setIsPlaying(false);
       persistState(currentTrackPosition, 0, false);
-      if (isArtist) {
-        if (currentTrackPosition < totalTracks) {
-          // Auto-advance to next track
-          playTrack(currentTrackPosition + 1);
-        } else {
-          // Last track finished — end the party
-          endPartyRef.current();
+      if (currentTrackPosition < totalTracks) {
+        // Not the last track — the artist auto-advances; guests follow the
+        // artist's next-track broadcast.
+        if (isArtist) playTrack(currentTrackPosition + 1);
+      } else {
+        // Last track finished — enter wind-down. No party_ended broadcast, so
+        // every client plays its own last track to its true end.
+        setPlaybackFinished(true);
+        if (isArtist) {
+          fetch(`/api/party/${partyId}/playback-ended`, { method: "POST" }).catch(
+            () => {}
+          );
         }
       }
     };
@@ -662,7 +671,7 @@ export function usePlaybackSync({
       audio.removeEventListener("error", onError);
       audio.removeEventListener("playing", onPlaying);
     };
-  }, [isArtist, currentTrackPosition, totalTracks, playTrack, persistState, getStreamProxyUrl, swapCount]);
+  }, [isArtist, currentTrackPosition, totalTracks, playTrack, persistState, getStreamProxyUrl, swapCount, partyId]);
 
   // End the party (artist only) — sets ended_at and broadcasts to guests
   const [partyEnded, setPartyEnded] = useState(false);
@@ -690,10 +699,17 @@ export function usePlaybackSync({
     setPartyEnded(true);
   }, [isArtist, partyEnded, channel, partyId]);
 
-  const endPartyRef = useRef(endParty);
+  // Wind-down 1-hour cap: once playback has finished, if the host never taps
+  // End Party, treat the party as ended after WIND_DOWN_CAP_MS.
   useEffect(() => {
-    endPartyRef.current = endParty;
-  });
+    if (!playbackFinished || partyEnded) return;
+    const startedAt = playbackEndedAt
+      ? new Date(playbackEndedAt).getTime()
+      : Date.now();
+    const remaining = startedAt + WIND_DOWN_CAP_MS - Date.now();
+    const timer = setTimeout(() => setPartyEnded(true), Math.max(0, remaining));
+    return () => clearTimeout(timer);
+  }, [playbackFinished, partyEnded, playbackEndedAt]);
 
   const resumeFromInteraction = useCallback(async () => {
     const audio = audioRef.current;
@@ -735,6 +751,7 @@ export function usePlaybackSync({
     playTrack,
     resumeFromInteraction,
     partyEnded,
+    playbackFinished,
     endParty,
   };
 }

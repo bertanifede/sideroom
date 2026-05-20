@@ -64,7 +64,7 @@ export default function PartyRoom({
     resumeFromInteraction,
     partyEnded,
     endParty,
-  } = usePlaybackSync({ channel, isArtist, tracks, partyId: party.id, initialPlaybackState, isConnected });
+  } = usePlaybackSync({ channel, isArtist, tracks, partyId: party.id, initialPlaybackState, isConnected, playbackEndedAt: party.playback_ended_at });
 
   const { messages, sendMessage } = usePartyChat({
     channel,

@@ -910,4 +910,38 @@ describe("usePlaybackSync hook", () => {
       expect(preloadAudio.src).toBe("");
     });
   });
+
+  it("artist: last track ending enters wind-down without a party_ended broadcast", async () => {
+    const channel = createMockChannel();
+    const audio = createMockAudio();
+    const { result } = renderWithAudio(audio, {
+      channel: channel as AnyChannel,
+      isArtist: true,
+      tracks: baseTracks,
+      partyId: "p1",
+      initialPlaybackState: null,
+      isConnected: true,
+    });
+
+    // Move to the last of the 3 tracks.
+    await act(async () => {
+      await result.current.playTrack(3);
+    });
+
+    // Fire the most recently registered "ended" listener.
+    const endedCalls = (audio.addEventListener as ReturnType<typeof vi.fn>).mock.calls.filter(
+      (c: unknown[]) => c[0] === "ended"
+    );
+    const onEnded = endedCalls[endedCalls.length - 1][1] as () => void;
+    await act(async () => {
+      onEnded();
+    });
+
+    // Wind-down entered, and NO party_ended broadcast was sent.
+    expect(result.current.playbackFinished).toBe(true);
+    const partyEndedSends = (channel.send as ReturnType<typeof vi.fn>).mock.calls.filter(
+      (c: unknown[]) => (c[0] as { event?: string } | undefined)?.event === "party_ended"
+    );
+    expect(partyEndedSends).toHaveLength(0);
+  });
 });
