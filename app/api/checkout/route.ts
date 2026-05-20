@@ -1,6 +1,5 @@
 import { createClient } from "@/lib/supabase/server";
 import { createServiceClient } from "@/lib/supabase/server";
-import { hashPin } from "@/lib/pin";
 import { stripe } from "@/lib/stripe";
 import { NextResponse } from "next/server";
 
@@ -61,7 +60,9 @@ export async function POST(request: Request) {
     pin: pinValue,
   };
 
-  const baseUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
+  // Strip any trailing slash so success_url/cancel_url never get a double
+  // slash (e.g. NEXT_PUBLIC_APP_URL set to "https://example.com/").
+  const baseUrl = (process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000").replace(/\/+$/, "");
 
   // Create Stripe Checkout Session
   const checkoutSession = await stripe.checkout.sessions.create({
