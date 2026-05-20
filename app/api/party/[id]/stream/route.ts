@@ -1,6 +1,7 @@
 import { createClient } from "@/lib/supabase/server";
 import { createServiceClient } from "@/lib/supabase/server";
 import { cookies } from "next/headers";
+import { getCachedSignedUrl, setCachedSignedUrl } from "@/lib/signed-url-cache";
 
 // Allow long-lived streaming responses. Without this the platform default
 // timeout can kill an open Range stream mid-playback. 300s is the Vercel Pro
@@ -71,41 +72,51 @@ export async function GET(
       return new Response("Unauthorized", { status: 403 });
     }
 
-    // --- Resolve file path ---
+    // --- Resolve a signed URL, reusing a cached one if still fresh ---
     const { searchParams } = new URL(request.url);
     const trackPosition = parseInt(searchParams.get("track") || "1", 10);
+    const cacheKey = `${id}:${trackPosition}`;
 
-    const { data: track } = await supabase
-      .from("tracks")
-      .select("file_path")
-      .eq("party_id", id)
-      .eq("position", trackPosition)
-      .single();
+    let signedUrlString: string;
+    const cachedUrl = getCachedSignedUrl(cacheKey);
 
-    let filePath = track?.file_path;
-
-    if (!filePath) {
-      const { data: party } = await supabase
-        .from("parties")
+    if (cachedUrl) {
+      signedUrlString = cachedUrl;
+    } else {
+      // Cache miss — resolve the file path and mint a fresh signed URL.
+      const { data: track } = await supabase
+        .from("tracks")
         .select("file_path")
-        .eq("id", id)
+        .eq("party_id", id)
+        .eq("position", trackPosition)
         .single();
 
-      filePath = party?.file_path;
-    }
+      let filePath = track?.file_path;
 
-    if (!filePath) {
-      return new Response("Track not found", { status: 404 });
-    }
+      if (!filePath) {
+        const { data: partyFile } = await supabase
+          .from("parties")
+          .select("file_path")
+          .eq("id", id)
+          .single();
+        filePath = partyFile?.file_path;
+      }
 
-    // --- Generate signed URL server-side (never sent to client) ---
-    const { data: signedUrl, error: storageError } = await supabase.storage
-      .from("party-audio")
-      .createSignedUrl(filePath, 60); // short-lived: 60 seconds
+      if (!filePath) {
+        return new Response("Track not found", { status: 404 });
+      }
 
-    if (storageError || !signedUrl) {
-      console.error("[stream] storage error:", storageError?.message, "for path:", filePath);
-      return new Response("Could not generate stream", { status: 500 });
+      const { data: signedUrl, error: storageError } = await supabase.storage
+        .from("party-audio")
+        .createSignedUrl(filePath, 60); // short-lived: 60 seconds
+
+      if (storageError || !signedUrl) {
+        console.error("[stream] storage error:", storageError?.message, "for path:", filePath);
+        return new Response("Could not generate stream", { status: 500 });
+      }
+
+      signedUrlString = signedUrl.signedUrl;
+      setCachedSignedUrl(cacheKey, signedUrlString);
     }
 
     // --- Fetch from Supabase, forwarding Range headers ---
@@ -115,7 +126,7 @@ export async function GET(
       headers["Range"] = rangeHeader;
     }
 
-    const upstream = await fetch(signedUrl.signedUrl, { headers });
+    const upstream = await fetch(signedUrlString, { headers });
 
     // --- Pipe response back to client ---
     const responseHeaders = new Headers();
