@@ -405,7 +405,7 @@ The `parties` table remains publicly readable (needed for invite code lookups by
 - `app/api/party/[id]/join/route.ts` — reads `pin_hash` from `party_secrets`
 - `app/api/party/[id]/route.ts` — writes PIN changes to `party_secrets`
 - `app/api/party/route.ts` — inserts PIN into `party_secrets` on party creation
-- `app/api/webhooks/stripe/route.ts` — inserts PIN into `party_secrets` on Stripe-created parties
+- `lib/create-party-from-checkout.ts` — shared, payment-gated party creation (called by the Stripe webhook and `/api/checkout/finalize`); inserts PIN into `party_secrets`
 
 ---
 

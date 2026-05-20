@@ -89,7 +89,7 @@ sideroom/
 │   ├── supabase/              # Supabase client factories
 │   ├── shaders/               # WebGL background shaders
 │   └── cleanup-*.ts           # File and checkout cleanup
-├── supabase/migrations/       # Database schema (14 migrations)
+├── supabase/migrations/       # Database schema (15 migrations)
 ├── remotion/                   # Hero video generation
 └── docs/                      # Architecture and security docs
 ```

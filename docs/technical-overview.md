@@ -82,6 +82,83 @@ No Redis. No application-level mutex. The database handles it.
 
 ---
 
+## Payment & Party Creation
+
+A party is created **only after Stripe confirms payment**. Creation is split
+into two phases so a paying customer always ends up with a party — even if a
+webhook never fires.
+
+### Phase 1 — Checkout (`POST /api/checkout`)
+
+When the artist finishes the create-party wizard:
+
+1. The uploaded track/cover file paths and all party settings are bundled
+   into a `party_data` JSON blob.
+2. A Stripe Checkout Session is created (`success_url` → `/payment/success`,
+   `metadata.artist_id` set to the artist).
+3. A `pending_checkouts` row is written. **No `parties` row exists yet.**
+4. The artist is redirected to Stripe.
+
+```
+pending_checkouts
+  id (UUID)
+  stripe_session_id (TEXT)
+  artist_id (UUID, references profiles)
+  party_data (JSONB) — the full party spec, captured pre-payment
+  created_at (TIMESTAMPTZ)
+```
+
+### Phase 2 — Party creation (self-healing)
+
+The party is created by one shared function — `createPartyFromCheckout`
+(`lib/create-party-from-checkout.ts`). It is:
+
+- **Payment-gated** — creates nothing unless the Stripe session's
+  `payment_status === "paid"`. Stripe is the source of truth; the flow
+  never assumes payment from context.
+- **Idempotent** — first checks for an existing party by
+  `stripe_session_id`; if found, returns it.
+- **Race-safe** — `parties.stripe_session_id` has a `UNIQUE` index. If two
+  callers race, the loser catches the unique violation and returns the
+  winner's party.
+
+It is invoked by **two independent triggers**, so a single failure cannot
+strand a paying customer:
+
+| Trigger | Fires when | Role |
+|---|---|---|
+| **Stripe webhook** (`POST /api/webhooks/stripe`) | Stripe sends `checkout.session.completed` | Fast path — usually creates the party within ~1–2 s of payment |
+| **`POST /api/checkout/finalize`** | The `/payment/success` page calls it on load | Guaranteed path — re-retrieves the session from Stripe and creates the party if the webhook hasn't |
+
+On success the `pending_checkouts` row is consumed (deleted), and the
+`parties` row, its `tracks`, and `party_secrets` (PIN, if any) are written.
+The party is created with `payment_status = "paid"`.
+
+### What the buyer sees (`/payment/success`)
+
+The success page calls `/api/checkout/finalize` and resolves to one of:
+
+- **Redirect to the dashboard** — party created (or already created by the
+  webhook).
+- **"Payment Didn't Go Through"** — Stripe reports the session unpaid; no
+  party was created.
+- **"Payment Received — being set up"** — a transient error (e.g. a Stripe
+  API hiccup); the webhook remains the backstop. No scary error screen.
+
+### Why two triggers
+
+Party creation previously depended entirely on the webhook. A misconfigured
+webhook endpoint once meant paying customers got no party at all. Now the
+success page independently finalizes the purchase, so the webhook is an
+optimization rather than a single point of failure. The `UNIQUE` index on
+`stripe_session_id` guarantees the two paths can never produce a duplicate.
+
+**Known residual gap:** if the webhook fails *and* the buyer closes the tab
+before `/payment/success` loads, neither trigger runs. Rare; a reconciliation
+cron could close it in future.
+
+---
+
 ## Real-Time Synchronization
 
 ### How Playback Sync Works
@@ -181,9 +258,14 @@ The transcoding pipeline (FFmpeg, async workers, webhook callbacks) is the most 
 
 | Route | Method | Purpose |
 |---|---|---|
-| `/api/party` | POST | Create a new party (auth required) |
+| `/api/checkout` | POST | Create a Stripe Checkout Session + a `pending_checkouts` row (auth required) |
+| `/api/checkout/finalize` | POST | Verify payment with Stripe and create the party — the self-heal path |
+| `/api/webhooks/stripe` | POST | Stripe `checkout.session.completed` handler — the fast party-creation path |
 | `/api/party/[id]/join` | POST | Claim a seat (guest name required) |
-| `/api/party/[id]/stream-url` | GET | Generate a signed URL for audio playback |
+| `/api/party/[id]/stream` | GET | Authenticated streaming proxy for audio playback |
+
+See **Payment & Party Creation** above for how the checkout, webhook, and
+finalize routes work together.
 
 ---
 
