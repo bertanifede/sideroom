@@ -428,6 +428,13 @@ export function usePlaybackSync({
           diag.log("sync", "heartbeat", {
             delta: Number(delta.toFixed(2)),
             action: correction.action,
+            pos: Number(event.position.toFixed(2)),
+            aCt: Number(audio.currentTime.toFixed(2)),
+            aPaused: audio.paused,
+            pCt: preloadAudioRef.current
+              ? Number(preloadAudioRef.current.currentTime.toFixed(2))
+              : null,
+            pPaused: preloadAudioRef.current ? preloadAudioRef.current.paused : null,
             sentAt: event.sentAt,
           });
           if (correction.action === "seek") {
