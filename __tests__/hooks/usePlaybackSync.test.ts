@@ -1,6 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { renderHook, act, waitFor } from "@testing-library/react";
-import { usePlaybackSync, computeSeekPosition, decideCorrection } from "@/hooks/usePlaybackSync";
+import {
+  usePlaybackSync,
+  computeSeekPosition,
+  decideCorrection,
+  shouldRetryAfterError,
+} from "@/hooks/usePlaybackSync";
 import type { Track, PlaybackState } from "@/types";
 
 // Mock fetch globally
@@ -64,6 +69,25 @@ describe("decideCorrection", () => {
   it("seeks when |delta| exceeds the seek threshold", () => {
     expect(decideCorrection(6)).toEqual({ action: "seek", playbackRate: 1 });
     expect(decideCorrection(-10)).toEqual({ action: "seek", playbackRate: 1 });
+  });
+});
+
+describe("shouldRetryAfterError", () => {
+  it("allows a retry when there are no prior errors", () => {
+    expect(shouldRetryAfterError([], 1000)).toBe(true);
+  });
+
+  it("allows retries while within the budget", () => {
+    expect(shouldRetryAfterError([1000, 1100, 1200], 1300)).toBe(true);
+  });
+
+  it("stops retrying once the budget is exceeded within the window", () => {
+    expect(shouldRetryAfterError([1000, 1100, 1200, 1300, 1400], 1500)).toBe(false);
+  });
+
+  it("ignores errors older than the window", () => {
+    // four old errors + one recent → only one counts
+    expect(shouldRetryAfterError([1000, 1100, 1200, 1300, 50000], 50100)).toBe(true);
   });
 });
 

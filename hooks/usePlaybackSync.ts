@@ -44,6 +44,24 @@ export function decideCorrection(delta: number): {
   return { action: "seek", playbackRate: 1 };
 }
 
+/** onError retry budget — see spec P1b. */
+const ERROR_RETRY_WINDOW_MS = 15_000;
+const ERROR_RETRY_BUDGET = 4;
+
+/**
+ * Pure: given timestamps of recent audio errors, decide whether another
+ * automatic recovery attempt is still within budget.
+ */
+export function shouldRetryAfterError(
+  errorTimestamps: number[],
+  now: number,
+  windowMs: number = ERROR_RETRY_WINDOW_MS,
+  budget: number = ERROR_RETRY_BUDGET
+): boolean {
+  const recent = errorTimestamps.filter((t) => now - t <= windowMs);
+  return recent.length <= budget;
+}
+
 interface UsePlaybackSyncProps {
   channel: RealtimeChannel | null;
   isArtist: boolean;
