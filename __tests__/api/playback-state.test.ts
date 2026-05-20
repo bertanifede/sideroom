@@ -13,8 +13,8 @@ const mockCreateClient = vi.fn(() => ({
 }));
 
 vi.mock("@/lib/supabase/server", () => ({
-  createServiceClient: (...args: unknown[]) => mockCreateServiceClient(...args),
-  createClient: (...args: unknown[]) => mockCreateClient(...args),
+  createServiceClient: () => mockCreateServiceClient(),
+  createClient: () => mockCreateClient(),
 }));
 
 const mockCookieGet = vi.fn();
