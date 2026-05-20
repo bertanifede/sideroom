@@ -115,4 +115,82 @@ describe("createPartyFromCheckout", () => {
     expect(result.status).toBe("exists");
     expect(result).toMatchObject({ inviteCode: "iron-glow-abc" });
   });
+
+  it("throws when a unique invite code cannot be generated", async () => {
+    const client = makeFakeClient({
+      parties: [
+        { data: null, error: null }, // idempotency check
+        { data: { id: "x" }, error: null }, // collision 1
+        { data: { id: "x" }, error: null }, // collision 2
+        { data: { id: "x" }, error: null }, // collision 3
+        { data: { id: "x" }, error: null }, // collision 4
+        { data: { id: "x" }, error: null }, // collision 5
+      ],
+      pending_checkouts: [
+        { data: { id: "pc1", artist_id: "artist1", party_data: PARTY_DATA }, error: null },
+      ],
+    });
+    await expect(createPartyFromCheckout(client, session())).rejects.toThrow(
+      /unique invite code/
+    );
+  });
+
+  it("hashes and stores the PIN, then creates the party", async () => {
+    const client = makeFakeClient({
+      parties: [
+        { data: null, error: null }, // idempotency check
+        { data: null, error: null }, // invite-code collision check
+        { data: { id: "p1", invite_code: "iron-glow-abc" }, error: null }, // insert
+      ],
+      pending_checkouts: [
+        {
+          data: {
+            id: "pc1",
+            artist_id: "artist1",
+            party_data: { ...PARTY_DATA, pin: "secret" },
+          },
+          error: null,
+        },
+        { data: null, error: null }, // delete
+      ],
+      party_secrets: [{ data: null, error: null }],
+      tracks: [{ data: null, error: null }],
+    });
+    const result = await createPartyFromCheckout(client, session());
+    expect(result.status).toBe("created");
+  });
+
+  it("rolls back the party and throws when track insertion fails", async () => {
+    const client = makeFakeClient({
+      parties: [
+        { data: null, error: null }, // idempotency check
+        { data: null, error: null }, // invite-code collision check
+        { data: { id: "p1", invite_code: "iron-glow-abc" }, error: null }, // insert
+        { data: null, error: null }, // rollback delete
+      ],
+      pending_checkouts: [
+        { data: { id: "pc1", artist_id: "artist1", party_data: PARTY_DATA }, error: null },
+      ],
+      tracks: [{ data: null, error: { message: "tracks boom" } }],
+    });
+    await expect(createPartyFromCheckout(client, session())).rejects.toThrow(
+      /Track creation failed/
+    );
+  });
+
+  it("throws when the party insert fails with a non-race error", async () => {
+    const client = makeFakeClient({
+      parties: [
+        { data: null, error: null }, // idempotency check
+        { data: null, error: null }, // invite-code collision check
+        { data: null, error: { code: "42501", message: "permission denied" } }, // insert
+      ],
+      pending_checkouts: [
+        { data: { id: "pc1", artist_id: "artist1", party_data: PARTY_DATA }, error: null },
+      ],
+    });
+    await expect(createPartyFromCheckout(client, session())).rejects.toThrow(
+      /Party creation failed/
+    );
+  });
 });

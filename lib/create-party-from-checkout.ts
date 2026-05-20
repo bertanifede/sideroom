@@ -78,15 +78,24 @@ export async function createPartyFromCheckout(
   const partyData = pending.party_data as PartyData;
 
   // 4. Generate a unique invite code (invite_code is also UNIQUE in the DB).
-  let invite_code = generateInviteCode();
+  let invite_code = "";
+  let codeFound = false;
   for (let attempts = 0; attempts < 5; attempts++) {
+    invite_code = generateInviteCode();
     const { data: clash } = await supabase
       .from("parties")
       .select("id")
       .eq("invite_code", invite_code)
       .maybeSingle();
-    if (!clash) break;
-    invite_code = generateInviteCode();
+    if (!clash) {
+      codeFound = true;
+      break;
+    }
+  }
+  if (!codeFound) {
+    throw new Error(
+      "createPartyFromCheckout: could not generate a unique invite code"
+    );
   }
 
   // 5. Hash the PIN if one was set.
@@ -134,9 +143,16 @@ export async function createPartyFromCheckout(
 
   // 7. Store the PIN hash in the secrets table.
   if (pin_hash) {
-    await supabase
+    const { error: secretError } = await supabase
       .from("party_secrets")
       .insert({ party_id: party.id, pin_hash });
+    if (secretError) {
+      console.error(
+        "createPartyFromCheckout: failed to store PIN hash for party",
+        party.id,
+        secretError.message
+      );
+    }
   }
 
   // 8. Insert tracks.
