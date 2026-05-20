@@ -15,6 +15,7 @@ export interface Party {
   seat_limit: number;
   scheduled_at: string;
   ended_at: string | null;
+  playback_ended_at: string | null;
   files_deleted: boolean;
   payment_status: "pending" | "paid" | "refunded";
   file_path: string | null;
