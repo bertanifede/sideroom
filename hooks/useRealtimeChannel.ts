@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { RealtimeChannel } from "@supabase/supabase-js";
+import { diag } from "@/lib/diagnostics";
 
 export interface PresenceUser {
   guest_name: string;
@@ -35,6 +36,7 @@ export function useRealtimeChannel(partyId: string, guestName: string, avatarUrl
         setPresenceState(users);
       })
       .subscribe(async (status) => {
+        diag.log("channel", "status", { status });
         if (status === "SUBSCRIBED") {
           await channel.track({ guest_name: guestName, avatar_url: avatarUrl ?? null });
           setIsConnected(true);

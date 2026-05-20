@@ -3,6 +3,7 @@
 import { useEffect, useRef, useCallback, useState } from "react";
 import { RealtimeChannel } from "@supabase/supabase-js";
 import { PlaybackEvent, PlaybackState, Track } from "@/types";
+import { diag } from "@/lib/diagnostics";
 
 /** Pure function: compute where to seek given persisted state + elapsed time */
 export function computeSeekPosition(
@@ -428,6 +429,12 @@ export function usePlaybackSync({
 
           const delta = event.position - audio.currentTime;
           const correction = decideCorrection(delta);
+          diag.recordHeartbeat(Math.abs(delta), correction.action);
+          diag.log("sync", "heartbeat", {
+            delta: Number(delta.toFixed(2)),
+            action: correction.action,
+            sentAt: event.sentAt,
+          });
           if (correction.action === "seek") {
             audio.currentTime = event.position;
             audio.playbackRate = 1;

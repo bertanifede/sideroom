@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, RefObject } from "react";
+import { diag } from "@/lib/diagnostics";
 
 interface UseAudioAnalyserOptions {
   audioRef: RefObject<HTMLAudioElement | null>;
@@ -21,6 +22,10 @@ export function useAudioAnalyser({ audioRef, isPlaying, swapCount }: UseAudioAna
 
     if (!contextRef.current) {
       contextRef.current = new AudioContext();
+      diag.log("analyser", "context-created", { state: contextRef.current.state });
+      contextRef.current.addEventListener("statechange", () => {
+        diag.log("analyser", "statechange", { state: contextRef.current?.state });
+      });
     }
 
     const ctx = contextRef.current;
@@ -40,7 +45,10 @@ export function useAudioAnalyser({ audioRef, isPlaying, swapCount }: UseAudioAna
     }
 
     if (ctx.state === "suspended") {
-      ctx.resume();
+      ctx.resume().then(
+        () => diag.log("analyser", "resumed", { state: ctx.state }),
+        () => diag.log("analyser", "resume-failed", {})
+      );
     }
 
     const analyser = analyserRef.current;
