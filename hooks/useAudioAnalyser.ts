@@ -7,9 +7,10 @@ interface UseAudioAnalyserOptions {
   audioRef: RefObject<HTMLAudioElement | null>;
   isPlaying: boolean;
   swapCount?: number;
+  enabled?: boolean;
 }
 
-export function useAudioAnalyser({ audioRef, isPlaying, swapCount }: UseAudioAnalyserOptions) {
+export function useAudioAnalyser({ audioRef, isPlaying, swapCount, enabled = true }: UseAudioAnalyserOptions) {
   const amplitudeRef = useRef(0);
   const contextRef = useRef<AudioContext | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
@@ -18,7 +19,7 @@ export function useAudioAnalyser({ audioRef, isPlaying, swapCount }: UseAudioAna
 
   useEffect(() => {
     const audio = audioRef.current;
-    if (!audio || !isPlaying) return;
+    if (!enabled || !audio || !isPlaying) return;
 
     if (!contextRef.current) {
       contextRef.current = new AudioContext();
@@ -72,7 +73,7 @@ export function useAudioAnalyser({ audioRef, isPlaying, swapCount }: UseAudioAna
     return () => {
       cancelAnimationFrame(rafRef.current);
     };
-  }, [audioRef, isPlaying, swapCount]);
+  }, [audioRef, isPlaying, swapCount, enabled]);
 
   // Cleanup AudioContext on unmount
   useEffect(() => {
