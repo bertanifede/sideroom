@@ -80,4 +80,27 @@ describe("POST /api/checkout/finalize", () => {
     const res = await POST(makeRequest({ session_id: "cs_1" }));
     expect(res.status).toBe(409);
   });
+
+  it("returns 200 with invite_code when the party already exists", async () => {
+    mockGetUser.mockResolvedValue({ data: { user: { id: "u1" } } });
+    mockRetrieve.mockResolvedValue({ id: "cs_1", metadata: { artist_id: "u1" } });
+    mockCreateParty.mockResolvedValue({ status: "exists", inviteCode: "iron-glow-abc" });
+    const res = await POST(makeRequest({ session_id: "cs_1" }));
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ invite_code: "iron-glow-abc" });
+  });
+
+  it("returns 500 when party creation throws", async () => {
+    mockGetUser.mockResolvedValue({ data: { user: { id: "u1" } } });
+    mockRetrieve.mockResolvedValue({ id: "cs_1", metadata: { artist_id: "u1" } });
+    mockCreateParty.mockRejectedValue(new Error("db down"));
+    const res = await POST(makeRequest({ session_id: "cs_1" }));
+    expect(res.status).toBe(500);
+  });
+
+  it("returns 400 when session_id is not a string", async () => {
+    mockGetUser.mockResolvedValue({ data: { user: { id: "u1" } } });
+    const res = await POST(makeRequest({ session_id: 12345 }));
+    expect(res.status).toBe(400);
+  });
 });

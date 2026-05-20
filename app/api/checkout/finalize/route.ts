@@ -30,7 +30,16 @@ export async function POST(request: Request) {
   }
 
   // Ownership — the session must belong to the logged-in user.
+  // This relies on app/api/checkout/route.ts setting metadata.artist_id
+  // when it creates the Checkout Session. A session without that metadata
+  // is treated as not-owned (403).
   if (session.metadata?.artist_id !== user.id) {
+    if (!session.metadata?.artist_id) {
+      console.warn(
+        "checkout/finalize: session has no artist_id metadata:",
+        session.id
+      );
+    }
     return NextResponse.json({ error: "forbidden" }, { status: 403 });
   }
 
