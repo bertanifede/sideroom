@@ -2,6 +2,11 @@ import { createClient } from "@/lib/supabase/server";
 import { createServiceClient } from "@/lib/supabase/server";
 import { cookies } from "next/headers";
 
+// Allow long-lived streaming responses. Without this the platform default
+// timeout can kill an open Range stream mid-playback. 300s is the Vercel Pro
+// cap; on Hobby the cap is 60 — lower this to 60 if the project is on Hobby.
+export const maxDuration = 300;
+
 export async function GET(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
