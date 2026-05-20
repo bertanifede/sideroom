@@ -63,6 +63,7 @@ export default function PartyRoom({
     playTrack,
     resumeFromInteraction,
     partyEnded,
+    playbackFinished,
     endParty,
   } = usePlaybackSync({ channel, isArtist, tracks, partyId: party.id, initialPlaybackState, isConnected, playbackEndedAt: party.playback_ended_at });
 
@@ -179,6 +180,7 @@ export default function PartyRoom({
           isPlaying={isPlaying}
           isLoading={isLoadingPlay}
           onTogglePlay={isPlaying ? pause : handlePlay}
+          playbackFinished={playbackFinished}
         />
       </div>
       <p className="text-base font-semibold tracking-tight text-center mt-4">
@@ -199,6 +201,13 @@ export default function PartyRoom({
           onResume={resumeFromInteraction}
         />
       </div>
+      {playbackFinished && !partyEnded && (
+        <p className="text-sm text-[var(--party-fg)]/60 text-center mt-3 max-w-sm">
+          {isArtist
+            ? "All tracks played — guests can still chat. Tap End Party when you're ready."
+            : "The set has finished — say goodbye in chat."}
+        </p>
+      )}
       {!partyEnded && (
         <div className="w-full max-w-sm mt-2">
           <LiveNoteButton

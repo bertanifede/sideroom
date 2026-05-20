@@ -7,6 +7,7 @@ interface ArtworkOverlayProps {
   isPlaying?: boolean;
   isLoading?: boolean;
   onTogglePlay?: () => void;
+  playbackFinished?: boolean;
 }
 
 export default function ArtworkOverlay({
@@ -18,6 +19,7 @@ export default function ArtworkOverlay({
   isPlaying,
   isLoading,
   onTogglePlay,
+  playbackFinished,
 }: ArtworkOverlayProps) {
   return (
     <div className="relative mb-2">
@@ -39,7 +41,17 @@ export default function ArtworkOverlay({
           }}
         />
       )}
-      {showPlayOverlay && (
+      {showPlayOverlay && playbackFinished && (
+        <div
+          className="absolute inset-0 flex items-center justify-center rounded-2xl text-center px-4"
+          style={{ backgroundColor: "rgba(0,0,0,0.45)" }}
+        >
+          <span className="text-white/90 text-sm font-medium">
+            Set finished — all tracks played
+          </span>
+        </div>
+      )}
+      {showPlayOverlay && !playbackFinished && (
         <button
           onClick={onTogglePlay}
           disabled={isLoading}
