@@ -133,14 +133,27 @@ Built early so it can verify P0 and P1 on a tethered mobile test session. Captur
 - `app/api/party/[id]/stream/route.ts` — per-request timing log (auth ms, sign ms, upstream TTFB, total ms, range, status), gated by a `DEBUG_STREAM` env var. Output appears in Vercel function logs.
 - `components/party/AudioPlayer.tsx` — a small user-facing "buffering…" indicator driven by `waiting`/`playing`, so guests see a state instead of silent confusion. (This part is not gated — it is a genuine UX improvement.)
 
-**Toggle flags (query params):** `?debug=1` (master logging switch), `?nogl=1` / `?gl=1` (WebGL override), `?noanalyser=1` (disable the Web Audio analyser).
+**Toggle flags (query params):** `?debug=1` (master logging switch) and `?noanalyser=1` (disable the Web Audio analyser on desktop for A/B testing).
 
 The instrumentation data also feeds tuning of the P0b band constants.
 
-### P3 — Analyser and WebGL guards
+### P3 — Remove dead WebGL code; desktop-only render extras
 
-- **WebGL background** — `components/party/PartyWebGLBackground.tsx` (and its mount point) renders a static gradient fallback by default on mobile, detected via `window.matchMedia("(pointer: coarse)")`. A pure helper `shouldRenderWebGL(isCoarsePointer, flags)` decides; `?gl=1` forces it on, `?nogl=1` forces it off. This is the only non-diagnostic behaviour change and ships enabled.
-- **Web Audio analyser** — `hooks/useAudioAnalyser.ts` is disabled by default on mobile (the `createMediaElementSource` reroute is a known iOS hazard) and respects the `?noanalyser=1` toggle. Its silent-dropout failure signature could be a genuine second bug; the P2 logs will confirm or clear it.
+Verified during planning: `PartyWebGLBackground` is imported into `PartyRoom.tsx` but never rendered. The WebGL shader background and everything it pulls in are dead code and are deleted:
+
+- `components/party/PartyWebGLBackground.tsx`
+- `components/party/ShaderDevControls.tsx`
+- `components/party/PartyGlowBackground.tsx`
+- `hooks/useWebGLBackground.ts`
+- `lib/shaders/` (`types.ts`, `fullscreenQuad.ts`, `presets/`)
+- the unused `PartyWebGLBackground` import in `components/party/PartyRoom.tsx`
+
+(`remotion/src/components/ArtworkAura.tsx` is a separate file for the Remotion video pipeline and is left untouched.)
+
+The remaining mobile render cost is then two animation loops, both gated:
+
+- **ArtworkAura** (`components/party/ArtworkAura.tsx`, a canvas aura animation) — rendered on **desktop only**. On mobile (`(pointer: coarse)`) it is not mounted. Detection via a shared `hooks/useCoarsePointer.ts` hook.
+- **Web Audio analyser** (`hooks/useAudioAnalyser.ts`) — gains an `enabled` option; disabled by default on mobile (the `createMediaElementSource` reroute is a known iOS hazard), and respects `?noanalyser=1` on desktop for A/B testing.
 
 ---
 
@@ -149,7 +162,7 @@ The instrumentation data also feeds tuning of the P0b band constants.
 1. **P0a + P0b** — the glitch fix; shippable on its own.
 2. **P1a + P1b** — proxy hardening.
 3. **P2** — instrumentation (may be built first/in parallel as the verification harness).
-4. **P3** — analyser + WebGL guards.
+4. **P3** — dead-code removal + render guards.
 
 ## Testing
 
@@ -157,7 +170,7 @@ Unit tests (Vitest) for the pure logic:
 - `decideCorrection` — every band, both directions, boundary values.
 - The diagnostics flag parser.
 - The signed-URL cache TTL logic.
-- `shouldRenderWebGL`.
+- `shouldRetryAfterError` — the `onError` retry-budget helper.
 
 The existing `__tests__/hooks/usePlaybackSync.test.ts` must remain green (diagnostics are a no-op when disabled). Integration verification is the tethered `?debug=1` mobile session reading the 30s summary lines.
 
