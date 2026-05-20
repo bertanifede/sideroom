@@ -18,31 +18,23 @@ export function computeSeekPosition(
     : position + elapsed;
 }
 
-/** Sync correction tuning — see spec P0b. */
-const SYNC_DEAD_ZONE_SEC = 2;
-const SYNC_SEEK_THRESHOLD_SEC = 5;
-const NUDGE_RATE_FASTER = 1.03;
-const NUDGE_RATE_SLOWER = 0.97;
+/** Sync correction tuning. */
+const SYNC_TOLERANCE_SEC = 10;
 
 /**
  * Pure decision for guest drift correction.
  * `delta` = artist position − guest position (positive ⇒ guest is behind).
+ *
+ * Within `SYNC_TOLERANCE_SEC` the guest is left completely alone — it plays at
+ * natural speed, a few seconds off the host, which is imperceptible for a
+ * remote listening party. Only a large desync (track change, long stall,
+ * backgrounded tab) triggers a single hard seek. There is deliberately no
+ * playbackRate nudging: continuous time-stretching is audible as a "wobble".
  */
-export function decideCorrection(delta: number): {
-  action: "none" | "nudge" | "seek";
-  playbackRate: number;
-} {
-  const magnitude = Math.abs(delta);
-  if (magnitude <= SYNC_DEAD_ZONE_SEC) {
-    return { action: "none", playbackRate: 1 };
-  }
-  if (magnitude <= SYNC_SEEK_THRESHOLD_SEC) {
-    return {
-      action: "nudge",
-      playbackRate: delta > 0 ? NUDGE_RATE_FASTER : NUDGE_RATE_SLOWER,
-    };
-  }
-  return { action: "seek", playbackRate: 1 };
+export function decideCorrection(delta: number): { action: "none" | "seek" } {
+  return Math.abs(delta) > SYNC_TOLERANCE_SEC
+    ? { action: "seek" }
+    : { action: "none" };
 }
 
 /** onError retry budget — see spec P1b. */
@@ -440,11 +432,6 @@ export function usePlaybackSync({
           });
           if (correction.action === "seek") {
             audio.currentTime = event.position;
-            audio.playbackRate = 1;
-          } else if (correction.action === "nudge") {
-            audio.playbackRate = correction.playbackRate;
-          } else if (audio.playbackRate !== 1) {
-            audio.playbackRate = 1;
           }
           break;
         }
@@ -561,17 +548,11 @@ export function usePlaybackSync({
         if (trackChanged) {
           // New src starts at 0 — seek directly to the recovered position.
           audio.currentTime = seekTo;
-          audio.playbackRate = 1;
         } else {
-          // Same track — three-band correction so a brief flap doesn't seek.
+          // Same track — only re-seek if the gap is large.
           const correction = decideCorrection(seekTo - audio.currentTime);
           if (correction.action === "seek") {
             audio.currentTime = seekTo;
-            audio.playbackRate = 1;
-          } else if (correction.action === "nudge") {
-            audio.playbackRate = correction.playbackRate;
-          } else {
-            audio.playbackRate = 1;
           }
         }
         try {

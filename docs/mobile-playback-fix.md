@@ -32,16 +32,18 @@ fragile under the connection patterns mobile browsers use.
 
 ### 1. The sync fix (the core change)
 
-The "hard-seek on any drift" rule is replaced with a **three-band correction**:
+The "hard-seek on any drift" rule is replaced with a **two-band tolerance**:
 
-| How far off the guest is | What happens | Audible? |
-|---|---|---|
-| within ~2 s of the host | nothing | — (you confirmed 1–2 s behind is fine) |
-| ~2–5 s off | playback speed is gently nudged (0.97–1.03×) to glide back | no — smooth, pitch preserved |
-| more than ~5 s off | one hard seek | yes, but rare — only after the phone slept/backgrounded |
+| How far off the guest is | What happens |
+|---|---|
+| within **10 s** of the host | nothing — the guest plays at natural speed, a few seconds off the host (imperceptible for a remote party) |
+| more than 10 s off | one hard seek to resync — rare (track change, long stall, backgrounded tab) |
 
-The same logic now also applies on **reconnection**, so a brief wifi blip no
-longer forces a skip. Pitch is preserved during nudges (tempo changes, not pitch).
+The guest's `playbackRate` is never altered. An earlier revision nudged
+playback speed (0.97–1.03×) for moderate drift, but on mobile the drift sits
+in that band almost permanently — continuous time-stretching is audible as a
+"wobble"/chorus artifact — so nudging was removed entirely. The same two-band
+rule applies on **reconnection**, so a brief wifi blip no longer forces a skip.
 
 ### 2. Streaming proxy hardening
 

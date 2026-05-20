@@ -49,26 +49,18 @@ describe("computeSeekPosition", () => {
 });
 
 describe("decideCorrection", () => {
-  it("returns 'none' with rate 1 when |delta| is within the dead zone", () => {
-    expect(decideCorrection(0)).toEqual({ action: "none", playbackRate: 1 });
-    expect(decideCorrection(1.5)).toEqual({ action: "none", playbackRate: 1 });
-    expect(decideCorrection(-1.5)).toEqual({ action: "none", playbackRate: 1 });
-    expect(decideCorrection(2)).toEqual({ action: "none", playbackRate: 1 });
+  it("returns 'none' within the tolerance band, in either direction", () => {
+    expect(decideCorrection(0)).toEqual({ action: "none" });
+    expect(decideCorrection(5)).toEqual({ action: "none" });
+    expect(decideCorrection(-8)).toEqual({ action: "none" });
+    expect(decideCorrection(10)).toEqual({ action: "none" });
+    expect(decideCorrection(-10)).toEqual({ action: "none" });
   });
 
-  it("nudges faster (1.03) when the guest is behind (positive delta)", () => {
-    expect(decideCorrection(3)).toEqual({ action: "nudge", playbackRate: 1.03 });
-    expect(decideCorrection(5)).toEqual({ action: "nudge", playbackRate: 1.03 });
-  });
-
-  it("nudges slower (0.97) when the guest is ahead (negative delta)", () => {
-    expect(decideCorrection(-3)).toEqual({ action: "nudge", playbackRate: 0.97 });
-    expect(decideCorrection(-5)).toEqual({ action: "nudge", playbackRate: 0.97 });
-  });
-
-  it("seeks when |delta| exceeds the seek threshold", () => {
-    expect(decideCorrection(6)).toEqual({ action: "seek", playbackRate: 1 });
-    expect(decideCorrection(-10)).toEqual({ action: "seek", playbackRate: 1 });
+  it("returns 'seek' only when drift exceeds the tolerance", () => {
+    expect(decideCorrection(10.5)).toEqual({ action: "seek" });
+    expect(decideCorrection(30)).toEqual({ action: "seek" });
+    expect(decideCorrection(-12)).toEqual({ action: "seek" });
   });
 });
 
@@ -319,7 +311,7 @@ describe("usePlaybackSync hook", () => {
     expect(audio.playbackRate).toBe(1);
   });
 
-  it("guest HEARTBEAT: nudges playbackRate (no seek) for moderate drift", async () => {
+  it("guest HEARTBEAT: leaves playback untouched for drift within tolerance", async () => {
     const channel = createMockChannel();
     const audio = createMockAudio();
     audio.src = "https://cdn.example.com/stream.mp3";
@@ -338,13 +330,13 @@ describe("usePlaybackSync hook", () => {
 
     await act(async () => {
       channel._trigger({
-        payload: { type: "HEARTBEAT", position: 53.5, track_position: 1, is_playing: true },
+        payload: { type: "HEARTBEAT", position: 58, track_position: 1, is_playing: true },
       });
     });
 
-    // delta = 53.5 - 50 = 3.5 → nudge, currentTime untouched
+    // delta = 58 - 50 = 8 → within 10s tolerance → no seek, no rate change
     expect(audio.currentTime).toBe(50);
-    expect(audio.playbackRate).toBe(1.03);
+    expect(audio.playbackRate).toBe(1);
   });
 
   it("guest HEARTBEAT: leaves playback untouched within the dead zone", async () => {
@@ -659,7 +651,7 @@ describe("usePlaybackSync hook", () => {
       expect(audio.play).toHaveBeenCalledTimes(2);
     });
 
-  it("reconnection re-sync: nudges instead of seeking after a brief flap", async () => {
+  it("reconnection re-sync: leaves playback alone after a brief flap", async () => {
     const channel = createMockChannel();
     const audio = createMockAudio();
     audio.src = "/api/party/p1/stream?track=1";
@@ -715,9 +707,9 @@ describe("usePlaybackSync hook", () => {
     });
     await act(async () => {});
 
-    // delta = 33 - 30 = 3 → nudge; currentTime unchanged
+    // delta = 33 - 30 = 3 → within tolerance; nothing touched
     expect(audio.currentTime).toBe(30);
-    expect(audio.playbackRate).toBe(1.03);
+    expect(audio.playbackRate).toBe(1);
   });
 
     it("resumeFromInteraction sets proxy URL when src was never set", async () => {
