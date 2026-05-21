@@ -33,11 +33,11 @@ export default function ArtworkOverlay({
           src={coverImageUrl}
           alt={`${title} cover`}
           crossOrigin={crossOrigin}
-          className="w-72 md:w-96 aspect-square rounded-2xl object-cover shadow-lg shadow-black/10"
+          className="w-40 md:w-96 aspect-square rounded-2xl object-cover shadow-lg shadow-black/10"
         />
       ) : (
         <div
-          className="w-72 md:w-96 aspect-square rounded-2xl shadow-lg shadow-black/10"
+          className="w-40 md:w-96 aspect-square rounded-2xl shadow-lg shadow-black/10"
           style={{
             background: fallbackGradient
               ? `linear-gradient(135deg, ${fallbackGradient.primary}, ${fallbackGradient.secondary})`

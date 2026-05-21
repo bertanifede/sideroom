@@ -22,3 +22,19 @@ describe("ArtworkOverlay — guest resume overlay", () => {
     expect(onResume).toHaveBeenCalledOnce();
   });
 });
+
+describe("ArtworkOverlay — responsive artwork size", () => {
+  it("renders the cover image at w-40 on mobile and md:w-96 on desktop", () => {
+    render(
+      <ArtworkOverlay title="Test" coverImageUrl="https://example.com/cover.jpg" />
+    );
+    const img = screen.getByAltText("Test cover");
+    expect(img).toHaveClass("w-40", "md:w-96");
+  });
+
+  it("renders the gradient fallback at w-40 on mobile and md:w-96 on desktop", () => {
+    const { container } = render(<ArtworkOverlay title="Test" />);
+    const fallback = container.querySelector("div.aspect-square");
+    expect(fallback).toHaveClass("w-40", "md:w-96");
+  });
+});
