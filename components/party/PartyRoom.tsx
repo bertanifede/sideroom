@@ -10,11 +10,15 @@ import LiveNoteButton from "./LiveNoteButton";
 import ArtworkOverlay from "./ArtworkOverlay";
 import ArtworkAura from "./ArtworkAura";
 import PartyLayout from "./PartyLayout";
-import PartyWebGLBackground from "./PartyWebGLBackground";
 import CountdownOverlay from "./CountdownOverlay";
 import PartyEndedOverlay from "./PartyEndedOverlay";
+import DebugOverlay from "./DebugOverlay";
 import { Party, PlaybackState, Track } from "@/types";
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
+import { useCoarsePointer } from "@/hooks/useCoarsePointer";
+import { useFrameHealth } from "@/hooks/useFrameHealth";
+import { useAudioDiagnostics } from "@/hooks/useAudioDiagnostics";
+import { diag, initDiagnostics } from "@/lib/diagnostics";
 
 interface PartyRoomProps {
   party: Party;
@@ -59,8 +63,9 @@ export default function PartyRoom({
     playTrack,
     resumeFromInteraction,
     partyEnded,
+    playbackFinished,
     endParty,
-  } = usePlaybackSync({ channel, isArtist, tracks, partyId: party.id, initialPlaybackState, isConnected });
+  } = usePlaybackSync({ channel, isArtist, tracks, partyId: party.id, initialPlaybackState, isConnected, playbackEndedAt: party.playback_ended_at });
 
   const { messages, sendMessage } = usePartyChat({
     channel,
@@ -85,7 +90,19 @@ export default function PartyRoom({
     : { primary: "#0c51da", secondary: "#4a9aff" };
 
   const colors = useAlbumColors(coverImageUrl ?? null, themeGradientColors);
-  const { amplitudeRef } = useAudioAnalyser({ audioRef, isPlaying, swapCount });
+  const isCoarsePointer = useCoarsePointer();
+  const { amplitudeRef } = useAudioAnalyser({
+    audioRef,
+    isPlaying,
+    swapCount,
+    enabled: !isCoarsePointer && !diag.flags.noAnalyser,
+  });
+
+  useFrameHealth();
+  useAudioDiagnostics(audioRef, swapCount);
+  useEffect(() => {
+    initDiagnostics();
+  }, []);
 
   const statusBadge = isConnected ? (
     <div className="flex items-center gap-1.5">
@@ -139,18 +156,21 @@ export default function PartyRoom({
               guestName={guestName}
             />
           )}
+          {diag.enabled && <DebugOverlay audioRef={audioRef} />}
         </>
       }
     >
       <div className="relative">
-        <ArtworkAura
-          colors={colors.palette}
-          scale={2.2}
-          blur={50}
-          grain={0.35}
-          pulseSpeed={4}
-          amplitudeRef={amplitudeRef}
-        />
+        {!isCoarsePointer && (
+          <ArtworkAura
+            colors={colors.palette}
+            scale={2.2}
+            blur={50}
+            grain={0.35}
+            pulseSpeed={4}
+            amplitudeRef={amplitudeRef}
+          />
+        )}
         <ArtworkOverlay
           coverImageUrl={coverImageUrl}
           fallbackGradient={themeGradientColors}
@@ -160,6 +180,9 @@ export default function PartyRoom({
           isPlaying={isPlaying}
           isLoading={isLoadingPlay}
           onTogglePlay={isPlaying ? pause : handlePlay}
+          playbackFinished={playbackFinished}
+          needsResume={!isArtist && needsInteraction}
+          onResume={resumeFromInteraction}
         />
       </div>
       <p className="text-base font-semibold tracking-tight text-center mt-4">
@@ -169,6 +192,7 @@ export default function PartyRoom({
         <AudioPlayer
           audioRef={audioRef}
           preloadAudioRef={preloadAudioRef}
+          swapCount={swapCount}
           isPlaying={isPlaying}
           currentTime={currentTime}
           duration={duration}
@@ -176,9 +200,21 @@ export default function PartyRoom({
           onPlay={handlePlay}
           onPause={pause}
           needsInteraction={needsInteraction}
-          onResume={resumeFromInteraction}
         />
       </div>
+      {playbackFinished && !partyEnded && (
+        <p role="status" className="text-sm text-[var(--party-fg)]/60 text-center mt-3 w-full max-w-sm">
+          {isArtist ? (
+            <>
+              {"All tracks played — guests can still chat."}
+              <br />
+              {"Tap End Party when you're ready."}
+            </>
+          ) : (
+            "Audio ended — say goodbye in the chat."
+          )}
+        </p>
+      )}
       {!partyEnded && (
         <div className="w-full max-w-sm mt-2">
           <LiveNoteButton

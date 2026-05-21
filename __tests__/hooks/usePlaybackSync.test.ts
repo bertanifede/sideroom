@@ -1,6 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { renderHook, act, waitFor } from "@testing-library/react";
-import { usePlaybackSync, computeSeekPosition } from "@/hooks/usePlaybackSync";
+import {
+  usePlaybackSync,
+  computeSeekPosition,
+  decideCorrection,
+  shouldRetryAfterError,
+} from "@/hooks/usePlaybackSync";
 import type { Track, PlaybackState } from "@/types";
 
 // Mock fetch globally
@@ -43,6 +48,41 @@ describe("computeSeekPosition", () => {
   });
 });
 
+describe("decideCorrection", () => {
+  it("returns 'none' within the tolerance band, in either direction", () => {
+    expect(decideCorrection(0)).toEqual({ action: "none" });
+    expect(decideCorrection(5)).toEqual({ action: "none" });
+    expect(decideCorrection(-8)).toEqual({ action: "none" });
+    expect(decideCorrection(10)).toEqual({ action: "none" });
+    expect(decideCorrection(-10)).toEqual({ action: "none" });
+  });
+
+  it("returns 'seek' only when drift exceeds the tolerance", () => {
+    expect(decideCorrection(10.5)).toEqual({ action: "seek" });
+    expect(decideCorrection(30)).toEqual({ action: "seek" });
+    expect(decideCorrection(-12)).toEqual({ action: "seek" });
+  });
+});
+
+describe("shouldRetryAfterError", () => {
+  it("allows a retry when there are no prior errors", () => {
+    expect(shouldRetryAfterError([], 1000)).toBe(true);
+  });
+
+  it("allows retries while within the budget", () => {
+    expect(shouldRetryAfterError([1000, 1100, 1200], 1300)).toBe(true);
+  });
+
+  it("stops retrying once the budget is exceeded within the window", () => {
+    expect(shouldRetryAfterError([1000, 1100, 1200, 1300, 1400], 1500)).toBe(false);
+  });
+
+  it("ignores errors older than the window", () => {
+    // four old errors + one recent → only one counts
+    expect(shouldRetryAfterError([1000, 1100, 1200, 1300, 50000], 50100)).toBe(true);
+  });
+});
+
 // ---------------------------------------------------------------------------
 // Hook integration tests — only for behavior that requires React lifecycle
 // ---------------------------------------------------------------------------
@@ -75,6 +115,7 @@ function createMockAudio() {
     load: vi.fn(),
     preload: "",
     crossOrigin: null,
+    playbackRate: 1,
   } as unknown as HTMLAudioElement;
 }
 
@@ -242,7 +283,7 @@ describe("usePlaybackSync hook", () => {
     expect(audio.src).toBe("/api/party/p1/stream?track=2");
   });
 
-  it("guest HEARTBEAT: corrects currentTime on drift > 2s", async () => {
+  it("guest HEARTBEAT: hard-seeks when drift exceeds the seek threshold", async () => {
     const channel = createMockChannel();
     const audio = createMockAudio();
     audio.src = "https://cdn.example.com/stream.mp3";
@@ -261,11 +302,227 @@ describe("usePlaybackSync hook", () => {
 
     await act(async () => {
       channel._trigger({
-        payload: { type: "HEARTBEAT", position: 55, track_position: 1, is_playing: true },
+        payload: { type: "HEARTBEAT", position: 100, track_position: 1, is_playing: true },
       });
     });
 
-    expect(audio.currentTime).toBe(55);
+    // delta = 100 - 50 = 50 → seek
+    expect(audio.currentTime).toBe(100);
+    expect(audio.playbackRate).toBe(1);
+  });
+
+  it("guest HEARTBEAT: leaves playback untouched for drift within tolerance", async () => {
+    const channel = createMockChannel();
+    const audio = createMockAudio();
+    audio.src = "https://cdn.example.com/stream.mp3";
+    (audio as unknown as { currentTime: number }).currentTime = 50;
+
+    renderWithAudio(audio, {
+      channel: channel as AnyChannel,
+      isArtist: false,
+      tracks: baseTracks,
+      partyId: "p1",
+      initialPlaybackState: null,
+      isConnected: true,
+    });
+
+    await act(async () => {});
+
+    await act(async () => {
+      channel._trigger({
+        payload: { type: "HEARTBEAT", position: 58, track_position: 1, is_playing: true },
+      });
+    });
+
+    // delta = 58 - 50 = 8 → within 10s tolerance → no seek, no rate change
+    expect(audio.currentTime).toBe(50);
+    expect(audio.playbackRate).toBe(1);
+  });
+
+  it("guest: resumes immediately when the audio is paused externally (route change)", async () => {
+    const channel = createMockChannel();
+    const audio = createMockAudio();
+    audio.src = "https://cdn.example.com/stream.mp3";
+
+    renderWithAudio(audio, {
+      channel: channel as AnyChannel,
+      isArtist: false,
+      tracks: baseTracks,
+      partyId: "p1",
+      initialPlaybackState: null,
+      isConnected: true,
+    });
+    await act(async () => {});
+
+    // Get the guest playing via a heartbeat.
+    await act(async () => {
+      channel._trigger({
+        payload: { type: "HEARTBEAT", position: 0, track_position: 1, is_playing: true },
+      });
+    });
+    const playsBefore = (audio.play as ReturnType<typeof vi.fn>).mock.calls.length;
+
+    // Simulate iOS pausing the element on a route change, then the pause event.
+    audio.pause();
+    const pauseCalls = (audio.addEventListener as ReturnType<typeof vi.fn>).mock.calls.filter(
+      (c: unknown[]) => c[0] === "pause"
+    );
+    const onPause = pauseCalls[pauseCalls.length - 1][1] as () => void;
+    await act(async () => {
+      onPause();
+    });
+
+    // The external pause was auto-resumed.
+    expect((audio.play as ReturnType<typeof vi.fn>).mock.calls.length).toBe(
+      playsBefore + 1
+    );
+  });
+
+  it("guest: does NOT auto-resume after the host pauses (no resume loop)", async () => {
+    const channel = createMockChannel();
+    const audio = createMockAudio();
+    audio.src = "https://cdn.example.com/stream.mp3";
+
+    renderWithAudio(audio, {
+      channel: channel as AnyChannel,
+      isArtist: false,
+      tracks: baseTracks,
+      partyId: "p1",
+      initialPlaybackState: null,
+      isConnected: true,
+    });
+    await act(async () => {});
+
+    // Get the guest playing.
+    await act(async () => {
+      channel._trigger({
+        payload: { type: "HEARTBEAT", position: 0, track_position: 1, is_playing: true },
+      });
+    });
+
+    // Host pauses the party.
+    await act(async () => {
+      channel._trigger({ payload: { type: "PAUSE", position: 12 } });
+    });
+    const playsBefore = (audio.play as ReturnType<typeof vi.fn>).mock.calls.length;
+
+    // The host's pause() fires the audio "pause" event — the listener must NOT
+    // resume it (that would fight the host and create a play/pause loop).
+    const pauseCalls = (audio.addEventListener as ReturnType<typeof vi.fn>).mock.calls.filter(
+      (c: unknown[]) => c[0] === "pause"
+    );
+    const onPause = pauseCalls[pauseCalls.length - 1][1] as () => void;
+    await act(async () => {
+      onPause();
+    });
+
+    expect((audio.play as ReturnType<typeof vi.fn>).mock.calls.length).toBe(
+      playsBefore
+    );
+  });
+
+  it("guest: throttles rapid external pauses instead of looping", async () => {
+    const channel = createMockChannel();
+    const audio = createMockAudio();
+    audio.src = "https://cdn.example.com/stream.mp3";
+
+    renderWithAudio(audio, {
+      channel: channel as AnyChannel,
+      isArtist: false,
+      tracks: baseTracks,
+      partyId: "p1",
+      initialPlaybackState: null,
+      isConnected: true,
+    });
+    await act(async () => {});
+    await act(async () => {
+      channel._trigger({
+        payload: { type: "HEARTBEAT", position: 0, track_position: 1, is_playing: true },
+      });
+    });
+
+    const pauseCalls = (audio.addEventListener as ReturnType<typeof vi.fn>).mock.calls.filter(
+      (c: unknown[]) => c[0] === "pause"
+    );
+    const onPause = pauseCalls[pauseCalls.length - 1][1] as () => void;
+
+    // First external pause → one resume attempt.
+    audio.pause();
+    await act(async () => {
+      onPause();
+    });
+    const afterFirst = (audio.play as ReturnType<typeof vi.fn>).mock.calls.length;
+
+    // It bounces straight back to paused → a second pause inside the throttle
+    // window must NOT trigger another resume (no loop).
+    audio.pause();
+    await act(async () => {
+      onPause();
+    });
+    expect((audio.play as ReturnType<typeof vi.fn>).mock.calls.length).toBe(
+      afterFirst
+    );
+  });
+
+  it("guest: resumeFromInteraction re-syncs to the host's position", async () => {
+    const channel = createMockChannel();
+    const audio = createMockAudio();
+    audio.src = "https://cdn.example.com/stream.mp3";
+
+    const { result } = renderWithAudio(audio, {
+      channel: channel as AnyChannel,
+      isArtist: false,
+      tracks: baseTracks,
+      partyId: "p1",
+      initialPlaybackState: null,
+      isConnected: true,
+    });
+    await act(async () => {});
+
+    // Heartbeat at host position 5 — drift is within tolerance, so the
+    // heartbeat itself does not seek.
+    await act(async () => {
+      channel._trigger({
+        payload: { type: "HEARTBEAT", position: 5, track_position: 1, is_playing: true },
+      });
+    });
+    expect(audio.currentTime).toBe(0);
+
+    await act(async () => {
+      await result.current.resumeFromInteraction();
+    });
+
+    // The manual resume jumped to roughly the host's current position.
+    expect(audio.currentTime).toBeGreaterThanOrEqual(5);
+    expect(audio.currentTime).toBeLessThan(6);
+  });
+
+  it("guest HEARTBEAT: leaves playback untouched within the dead zone", async () => {
+    const channel = createMockChannel();
+    const audio = createMockAudio();
+    audio.src = "https://cdn.example.com/stream.mp3";
+    (audio as unknown as { currentTime: number }).currentTime = 50;
+
+    renderWithAudio(audio, {
+      channel: channel as AnyChannel,
+      isArtist: false,
+      tracks: baseTracks,
+      partyId: "p1",
+      initialPlaybackState: null,
+      isConnected: true,
+    });
+
+    await act(async () => {});
+
+    await act(async () => {
+      channel._trigger({
+        payload: { type: "HEARTBEAT", position: 51, track_position: 1, is_playing: true },
+      });
+    });
+
+    // delta = 1 → dead zone, no change
+    expect(audio.currentTime).toBe(50);
+    expect(audio.playbackRate).toBe(1);
   });
 
   it("guest HEARTBEAT: resumes play when artist is_playing but audio is paused", async () => {
@@ -552,6 +809,67 @@ describe("usePlaybackSync hook", () => {
       expect(audio.play).toHaveBeenCalledTimes(2);
     });
 
+  it("reconnection re-sync: leaves playback alone after a brief flap", async () => {
+    const channel = createMockChannel();
+    const audio = createMockAudio();
+    audio.src = "/api/party/p1/stream?track=1";
+    (audio as unknown as { currentTime: number }).currentTime = 30;
+
+    mockFetch.mockImplementation((url: unknown) => {
+      if (typeof url === "string" && url.includes("playback-state")) {
+        return Promise.resolve({
+          ok: true,
+          json: () =>
+            Promise.resolve({
+              playback_state: {
+                track_position: 1,
+                position: 33,
+                is_playing: true,
+                updated_at: new Date().toISOString(),
+              },
+            }),
+        });
+      }
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({}) });
+    });
+
+    const { rerender } = renderHook(
+      (props: Parameters<typeof usePlaybackSync>[0]) => {
+        const r = usePlaybackSync(props);
+        (r.audioRef as { current: HTMLAudioElement }).current = audio;
+        return r;
+      },
+      {
+        initialProps: {
+          channel: channel as AnyChannel,
+          isArtist: false,
+          tracks: baseTracks,
+          partyId: "p1",
+          initialPlaybackState: null,
+          isConnected: false,
+        },
+      }
+    );
+
+    await act(async () => {});
+
+    await act(async () => {
+      rerender({
+        channel: channel as AnyChannel,
+        isArtist: false,
+        tracks: baseTracks,
+        partyId: "p1",
+        initialPlaybackState: null,
+        isConnected: true,
+      });
+    });
+    await act(async () => {});
+
+    // delta = 33 - 30 = 3 → within tolerance; nothing touched
+    expect(audio.currentTime).toBe(30);
+    expect(audio.playbackRate).toBe(1);
+  });
+
     it("resumeFromInteraction sets proxy URL when src was never set", async () => {
       const channel = createMockChannel();
       const audio = createMockAudio();
@@ -749,5 +1067,39 @@ describe("usePlaybackSync hook", () => {
       // Should NOT preload — there's no track 4
       expect(preloadAudio.src).toBe("");
     });
+  });
+
+  it("artist: last track ending enters wind-down without a party_ended broadcast", async () => {
+    const channel = createMockChannel();
+    const audio = createMockAudio();
+    const { result } = renderWithAudio(audio, {
+      channel: channel as AnyChannel,
+      isArtist: true,
+      tracks: baseTracks,
+      partyId: "p1",
+      initialPlaybackState: null,
+      isConnected: true,
+    });
+
+    // Move to the last of the 3 tracks.
+    await act(async () => {
+      await result.current.playTrack(3);
+    });
+
+    // Fire the most recently registered "ended" listener.
+    const endedCalls = (audio.addEventListener as ReturnType<typeof vi.fn>).mock.calls.filter(
+      (c: unknown[]) => c[0] === "ended"
+    );
+    const onEnded = endedCalls[endedCalls.length - 1][1] as () => void;
+    await act(async () => {
+      onEnded();
+    });
+
+    // Wind-down entered, and NO party_ended broadcast was sent.
+    expect(result.current.playbackFinished).toBe(true);
+    const partyEndedSends = (channel.send as ReturnType<typeof vi.fn>).mock.calls.filter(
+      (c: unknown[]) => (c[0] as { event?: string } | undefined)?.event === "party_ended"
+    );
+    expect(partyEndedSends).toHaveLength(0);
   });
 });

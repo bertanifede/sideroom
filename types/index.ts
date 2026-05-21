@@ -15,6 +15,7 @@ export interface Party {
   seat_limit: number;
   scheduled_at: string;
   ended_at: string | null;
+  playback_ended_at: string | null;
   files_deleted: boolean;
   payment_status: "pending" | "paid" | "refunded";
   file_path: string | null;
@@ -70,10 +71,10 @@ export interface PlaybackState {
 
 // Realtime event types
 export type PlaybackEvent =
-  | { type: "PLAY"; position: number; track_position: number }
-  | { type: "PAUSE"; position: number }
-  | { type: "SEEK"; position: number }
-  | { type: "HEARTBEAT"; position: number; track_position: number; is_playing: boolean };
+  | { type: "PLAY"; position: number; track_position: number; sentAt?: number }
+  | { type: "PAUSE"; position: number; sentAt?: number }
+  | { type: "SEEK"; position: number; sentAt?: number }
+  | { type: "HEARTBEAT"; position: number; track_position: number; is_playing: boolean; sentAt?: number };
 
 export type ChatEvent = {
   type: "CHAT";

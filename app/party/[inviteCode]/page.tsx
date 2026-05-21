@@ -6,6 +6,7 @@ import PartyRoom from "@/components/party/PartyRoom";
 import { PartyFeedbackList } from "@/components/dashboard/PartyFeedbackList";
 import PostPartyReview from "@/components/party/review/PostPartyReview";
 import { Feedback, PartyTheme } from "@/types";
+import { partyLifecycle } from "@/lib/party-lifecycle";
 import JoinForm from "./JoinForm";
 
 export async function generateMetadata({
@@ -74,12 +75,10 @@ export default async function PartyPage({
 
   if (!party) notFound();
 
-  // If the party has ended (explicitly or 6h past scheduled time), show ended state
-  const isExpired =
-    party.scheduled_at &&
-    Date.now() - new Date(party.scheduled_at).getTime() > 6 * 60 * 60 * 1000;
+  // Ended = host ended it, 1h past wind-down, or 6h past the scheduled start.
+  const lifecycle = partyLifecycle(party, Date.now());
 
-  if (party.ended_at || isExpired) {
+  if (lifecycle === "ended") {
     const coverImageUrl = await getCoverImageUrl(party.cover_image_path);
     const {
       data: { user: currentUser },

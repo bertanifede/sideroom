@@ -7,6 +7,9 @@ interface ArtworkOverlayProps {
   isPlaying?: boolean;
   isLoading?: boolean;
   onTogglePlay?: () => void;
+  playbackFinished?: boolean;
+  needsResume?: boolean;
+  onResume?: () => void;
 }
 
 export default function ArtworkOverlay({
@@ -18,6 +21,9 @@ export default function ArtworkOverlay({
   isPlaying,
   isLoading,
   onTogglePlay,
+  playbackFinished,
+  needsResume,
+  onResume,
 }: ArtworkOverlayProps) {
   return (
     <div className="relative mb-2">
@@ -39,7 +45,18 @@ export default function ArtworkOverlay({
           }}
         />
       )}
-      {showPlayOverlay && (
+      {showPlayOverlay && playbackFinished && (
+        <div
+          role="status"
+          className="absolute inset-0 flex items-center justify-center rounded-2xl text-center px-4"
+          style={{ backgroundColor: "rgba(0,0,0,0.45)" }}
+        >
+          <span className="text-white/90 text-sm font-medium">
+            All tracks played
+          </span>
+        </div>
+      )}
+      {showPlayOverlay && !playbackFinished && (
         <button
           onClick={onTogglePlay}
           disabled={isLoading}
@@ -64,6 +81,21 @@ export default function ArtworkOverlay({
               </svg>
             )}
           </span>
+        </button>
+      )}
+      {needsResume && (
+        <button
+          onClick={onResume}
+          aria-label="Resume playback"
+          className="absolute inset-0 flex flex-col items-center justify-center gap-3 rounded-2xl cursor-pointer"
+          style={{ backgroundColor: "rgba(0,0,0,0.6)" }}
+        >
+          <span className="w-16 h-16 rounded-full bg-white/25 backdrop-blur-sm flex items-center justify-center animate-pulse">
+            <svg width="28" height="28" viewBox="0 0 24 24" fill="white">
+              <path d="M8 5.14v13.72a1 1 0 0 0 1.5.86l11-6.86a1 1 0 0 0 0-1.72l-11-6.86a1 1 0 0 0-1.5.86z" />
+            </svg>
+          </span>
+          <span className="text-white text-sm font-medium">Tap to resume</span>
         </button>
       )}
     </div>

@@ -3,6 +3,8 @@
 import { useEffect, useRef, useCallback, useState } from "react";
 import { RealtimeChannel } from "@supabase/supabase-js";
 import { PlaybackEvent, PlaybackState, Track } from "@/types";
+import { diag } from "@/lib/diagnostics";
+import { WIND_DOWN_CAP_MS } from "@/lib/party-lifecycle";
 
 /** Pure function: compute where to seek given persisted state + elapsed time */
 export function computeSeekPosition(
@@ -17,6 +19,43 @@ export function computeSeekPosition(
     : position + elapsed;
 }
 
+/** Sync correction tuning. */
+const SYNC_TOLERANCE_SEC = 10;
+
+/**
+ * Pure decision for guest drift correction.
+ * `delta` = artist position − guest position (positive ⇒ guest is behind).
+ *
+ * Within `SYNC_TOLERANCE_SEC` the guest is left completely alone — it plays at
+ * natural speed, a few seconds off the host, which is imperceptible for a
+ * remote listening party. Only a large desync (track change, long stall,
+ * backgrounded tab) triggers a single hard seek. There is deliberately no
+ * playbackRate nudging: continuous time-stretching is audible as a "wobble".
+ */
+export function decideCorrection(delta: number): { action: "none" | "seek" } {
+  return Math.abs(delta) > SYNC_TOLERANCE_SEC
+    ? { action: "seek" }
+    : { action: "none" };
+}
+
+/** onError retry budget — see spec P1b. */
+const ERROR_RETRY_WINDOW_MS = 15_000;
+const ERROR_RETRY_BUDGET = 4;
+
+/**
+ * Pure: given timestamps of recent audio errors, decide whether another
+ * automatic recovery attempt is still within budget.
+ */
+export function shouldRetryAfterError(
+  errorTimestamps: number[],
+  now: number,
+  windowMs: number = ERROR_RETRY_WINDOW_MS,
+  budget: number = ERROR_RETRY_BUDGET
+): boolean {
+  const recent = errorTimestamps.filter((t) => now - t <= windowMs);
+  return recent.length <= budget;
+}
+
 interface UsePlaybackSyncProps {
   channel: RealtimeChannel | null;
   isArtist: boolean;
@@ -24,6 +63,7 @@ interface UsePlaybackSyncProps {
   partyId: string;
   initialPlaybackState?: PlaybackState | null;
   isConnected?: boolean;
+  playbackEndedAt?: string | null;
 }
 
 export function usePlaybackSync({
@@ -33,6 +73,7 @@ export function usePlaybackSync({
   partyId,
   initialPlaybackState,
   isConnected = false,
+  playbackEndedAt,
 }: UsePlaybackSyncProps) {
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const preloadAudioRef = useRef<HTMLAudioElement | null>(null);
@@ -44,11 +85,25 @@ export function usePlaybackSync({
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
   const [currentTrackPosition, setCurrentTrackPosition] = useState(1);
   const [needsInteraction, setNeedsInteraction] = useState(false);
+  const [playbackFinished, setPlaybackFinished] = useState(!!playbackEndedAt);
   const heartbeatRef = useRef<NodeJS.Timeout | null>(null);
   const persistTimerRef = useRef<NodeJS.Timeout | null>(null);
   const recoveryAttemptedRef = useRef(false);
   const recoveryCompleteRef = useRef(false);
   const currentTrackPositionRef = useRef(currentTrackPosition);
+  const errorTimestampsRef = useRef<number[]>([]);
+  // Debug-only: previous heartbeat's guest currentTime, to log how much the
+  // guest's playback actually advanced between heartbeats (liveness signal).
+  const prevHbCtRef = useRef<number | null>(null);
+  // Mirrors `isPlaying` for synchronous reads inside the audio `pause` listener.
+  // Set false *before* any intentional pause so the route-change auto-resume
+  // can tell an external (iOS) pause apart from one we caused.
+  const isPlayingRef = useRef(false);
+  // Latest host position from a heartbeat — used to re-sync a manual resume.
+  const lastHostPosRef = useRef<{ position: number; at: number } | null>(null);
+  // Timestamp of the last auto-resume attempt — throttles the pause listener so
+  // a resume that instantly bounces back to paused can't spin in a loop.
+  const lastResumeAttemptRef = useRef(0);
 
   const totalTracks = tracks.length;
   const currentTrack = tracks.find((t) => t.position === currentTrackPosition) ?? null;
@@ -60,7 +115,7 @@ export function usePlaybackSync({
       channel.send({
         type: "broadcast",
         event: "playback",
-        payload: event,
+        payload: { ...event, sentAt: Date.now() },
       });
     },
     [channel]
@@ -97,6 +152,10 @@ export function usePlaybackSync({
   useEffect(() => {
     currentTrackPositionRef.current = currentTrackPosition;
   }, [currentTrackPosition]);
+
+  useEffect(() => {
+    isPlayingRef.current = isPlaying;
+  }, [isPlaying]);
 
   // Play a specific track
   const playTrack = useCallback(
@@ -314,8 +373,12 @@ export function usePlaybackSync({
           break;
         }
         case "PAUSE": {
+          isPlayingRef.current = false;
           audio.pause();
           audio.currentTime = event.position;
+          // Clear any in-progress sync nudge — no heartbeats arrive while
+          // paused, so a stuck playbackRate would not self-correct.
+          audio.playbackRate = 1;
           setIsPlaying(false);
           break;
         }
@@ -325,6 +388,7 @@ export function usePlaybackSync({
           break;
         }
         case "HEARTBEAT": {
+          lastHostPosRef.current = { position: event.position, at: Date.now() };
           // Track change recovery: if artist is on a different track, switch
           if (event.track_position && event.track_position !== currentTrackPositionRef.current) {
             const preload = preloadAudioRef.current;
@@ -367,23 +431,48 @@ export function usePlaybackSync({
                 setNeedsInteraction(true);
               }
             }
+            prevHbCtRef.current = null;
             break;
           }
 
           // If artist says playing but we're paused, resume
           if (event.is_playing && audio.paused) {
+            diag.log("sync", "resume-attempt", {
+              aCt: Number(audio.currentTime.toFixed(2)),
+            });
             try {
               await audio.play();
               setIsPlaying(true);
-            } catch {
+              diag.log("sync", "resume-ok", {});
+            } catch (e) {
               setNeedsInteraction(true);
+              diag.log("sync", "resume-failed", { err: String(e) });
             }
           }
 
-          const drift = Math.abs(audio.currentTime - event.position);
-          if (drift > 2) {
-            audio.currentTime = event.position;
-          } else if (drift > 0.3) {
+          const delta = event.position - audio.currentTime;
+          const correction = decideCorrection(delta);
+          const ctNow = audio.currentTime;
+          const ctAdv =
+            prevHbCtRef.current != null
+              ? Number((ctNow - prevHbCtRef.current).toFixed(2))
+              : null;
+          prevHbCtRef.current = ctNow;
+          diag.recordHeartbeat(Math.abs(delta), correction.action);
+          diag.log("sync", "heartbeat", {
+            delta: Number(delta.toFixed(2)),
+            action: correction.action,
+            pos: Number(event.position.toFixed(2)),
+            aCt: Number(ctNow.toFixed(2)),
+            ctAdv,
+            aPaused: audio.paused,
+            pCt: preloadAudioRef.current
+              ? Number(preloadAudioRef.current.currentTime.toFixed(2))
+              : null,
+            pPaused: preloadAudioRef.current ? preloadAudioRef.current.paused : null,
+            sentAt: event.sentAt,
+          });
+          if (correction.action === "seek") {
             audio.currentTime = event.position;
           }
           break;
@@ -396,6 +485,7 @@ export function usePlaybackSync({
     const handlePartyEnded = () => {
       const audio = audioRef.current;
       if (audio) {
+        isPlayingRef.current = false;
         audio.pause();
         setIsPlaying(false);
       }
@@ -410,6 +500,43 @@ export function usePlaybackSync({
       (channel as any).off?.("broadcast", { event: "party_ended" });
     };
   }, [channel, isArtist, getStreamProxyUrl]);
+
+  // Guest: an iOS audio-route change (e.g. AirPods connecting) pauses the
+  // <audio> element. Resume immediately on the pause event instead of waiting
+  // up to a heartbeat interval — but only for an *external* pause, never the
+  // host's PAUSE, the natural end of a track, or a track swap.
+  useEffect(() => {
+    if (isArtist) return;
+    const audio = audioRef.current;
+    if (!audio) return;
+
+    const onExternalPause = () => {
+      if (audio !== audioRef.current) return; // stale element mid-swap
+      if (!recoveryCompleteRef.current) return; // still recovering on join
+      if (!isPlayingRef.current) return; // an intentional pause (host / end)
+      if (audio.ended) return; // natural end of a track
+      if (!audio.paused) return; // already playing again
+      // Throttle: if a resume was attempted in the last 2s the element is
+      // bouncing straight back to paused — stop auto-retrying and surface the
+      // manual "tap to resume" control instead of looping.
+      if (Date.now() - lastResumeAttemptRef.current < 2000) {
+        diag.log("sync", "external-pause-throttled", {});
+        setNeedsInteraction(true);
+        return;
+      }
+      lastResumeAttemptRef.current = Date.now();
+      diag.log("sync", "external-pause-resume", {
+        aCt: Number(audio.currentTime.toFixed(2)),
+      });
+      audio.play().then(
+        () => setNeedsInteraction(false),
+        () => setNeedsInteraction(true)
+      );
+    };
+
+    audio.addEventListener("pause", onExternalPause);
+    return () => audio.removeEventListener("pause", onExternalPause);
+  }, [isArtist, swapCount]);
 
   // Guest recovery: restore playback from persisted state on mount
   useEffect(() => {
@@ -490,13 +617,24 @@ export function usePlaybackSync({
         const seekTo = computeSeekPosition(state.position, state.updated_at, trackDur);
 
         // Switch track if needed
-        if (state.track_position !== currentTrackPositionRef.current || !audio.src) {
+        const trackChanged =
+          state.track_position !== currentTrackPositionRef.current || !audio.src;
+        if (trackChanged) {
           const url = getStreamProxyUrl(state.track_position);
           audio.src = url;
           setAudioUrl(url);
         }
 
-        audio.currentTime = seekTo;
+        if (trackChanged) {
+          // New src starts at 0 — seek directly to the recovered position.
+          audio.currentTime = seekTo;
+        } else {
+          // Same track — only re-seek if the gap is large.
+          const correction = decideCorrection(seekTo - audio.currentTime);
+          if (correction.action === "seek") {
+            audio.currentTime = seekTo;
+          }
+        }
         try {
           await audio.play();
           setIsPlaying(true);
@@ -536,20 +674,54 @@ export function usePlaybackSync({
     const onEnded = () => {
       setIsPlaying(false);
       persistState(currentTrackPosition, 0, false);
-      if (isArtist) {
-        if (currentTrackPosition < totalTracks) {
-          // Auto-advance to next track
-          playTrack(currentTrackPosition + 1);
-        } else {
-          // Last track finished — end the party
-          endPartyRef.current();
+      if (currentTrackPosition < totalTracks) {
+        // Not the last track — the artist auto-advances; guests follow the
+        // artist's next-track broadcast.
+        if (isArtist) playTrack(currentTrackPosition + 1);
+      } else {
+        // Last track finished — enter wind-down. No party_ended broadcast, so
+        // every client plays its own last track to its true end.
+        setPlaybackFinished(true);
+        if (isArtist) {
+          // Persist the wind-down start. This timestamp drives partyLifecycle
+          // for clients that load later, so retry once on failure (network
+          // error OR non-2xx) rather than silently dropping it. The route is
+          // idempotent server-side, so the retry is safe.
+          void (async () => {
+            for (let attempt = 0; attempt < 2; attempt++) {
+              try {
+                const res = await fetch(
+                  `/api/party/${partyId}/playback-ended`,
+                  { method: "POST" }
+                );
+                if (res.ok) return;
+              } catch {
+                // network error — fall through to the retry
+              }
+              if (attempt === 0) {
+                await new Promise((r) => setTimeout(r, 2000));
+              }
+            }
+            diag.log("sync", "playback-ended-post-failed", { partyId });
+          })();
         }
       }
     };
 
-    // Re-set proxy URL on error (proxy generates fresh signed URL each request)
+    // On error: retry the proxy URL within budget, then give up instead of
+    // looping. The proxy mints a fresh signed URL on each request.
     const onError = async () => {
       if (!audio.src) return;
+
+      const now = Date.now();
+      errorTimestampsRef.current.push(now);
+
+      if (!shouldRetryAfterError(errorTimestampsRef.current, now)) {
+        // Retry budget exhausted — stop the reload loop, surface to the user.
+        setNeedsInteraction(true);
+        return;
+      }
+
       const savedTime = audio.currentTime;
       const wasPlaying = !audio.paused;
 
@@ -568,18 +740,25 @@ export function usePlaybackSync({
       }
     };
 
+    // A clean resume clears the error budget.
+    const onPlaying = () => {
+      errorTimestampsRef.current = [];
+    };
+
     audio.addEventListener("timeupdate", onTimeUpdate);
     audio.addEventListener("durationchange", onDurationChange);
     audio.addEventListener("ended", onEnded);
     audio.addEventListener("error", onError);
+    audio.addEventListener("playing", onPlaying);
 
     return () => {
       audio.removeEventListener("timeupdate", onTimeUpdate);
       audio.removeEventListener("durationchange", onDurationChange);
       audio.removeEventListener("ended", onEnded);
       audio.removeEventListener("error", onError);
+      audio.removeEventListener("playing", onPlaying);
     };
-  }, [isArtist, currentTrackPosition, totalTracks, playTrack, persistState, getStreamProxyUrl, swapCount]);
+  }, [isArtist, currentTrackPosition, totalTracks, playTrack, persistState, getStreamProxyUrl, swapCount, partyId]);
 
   // End the party (artist only) — sets ended_at and broadcasts to guests
   const [partyEnded, setPartyEnded] = useState(false);
@@ -607,10 +786,19 @@ export function usePlaybackSync({
     setPartyEnded(true);
   }, [isArtist, partyEnded, channel, partyId]);
 
-  const endPartyRef = useRef(endParty);
+  // Wind-down 1-hour cap: once playback has finished, if the host never taps
+  // End Party, treat the party as ended after WIND_DOWN_CAP_MS.
   useEffect(() => {
-    endPartyRef.current = endParty;
-  });
+    if (!playbackFinished || partyEnded) return;
+    // On the host whose track just finished, playbackEndedAt (a server prop) is
+    // still null until a refetch/remount, so anchor the cap to now() this session.
+    const startedAt = playbackEndedAt
+      ? new Date(playbackEndedAt).getTime()
+      : Date.now();
+    const remaining = startedAt + WIND_DOWN_CAP_MS - Date.now();
+    const timer = setTimeout(() => setPartyEnded(true), Math.max(0, remaining));
+    return () => clearTimeout(timer);
+  }, [playbackFinished, partyEnded, playbackEndedAt]);
 
   const resumeFromInteraction = useCallback(async () => {
     const audio = audioRef.current;
@@ -621,6 +809,16 @@ export function usePlaybackSync({
       const url = getStreamProxyUrl(currentTrackPositionRef.current);
       audio.src = url;
       setAudioUrl(url);
+    }
+
+    // Re-sync to where the host is now, so a manual resume doesn't land
+    // seconds behind (which would otherwise trigger a corrective hard seek).
+    const hostPos = lastHostPosRef.current;
+    if (hostPos && Date.now() - hostPos.at < 15000) {
+      const target = hostPos.position + (Date.now() - hostPos.at) / 1000;
+      audio.currentTime = audio.duration
+        ? Math.min(target, audio.duration)
+        : target;
     }
 
     try {
@@ -652,6 +850,7 @@ export function usePlaybackSync({
     playTrack,
     resumeFromInteraction,
     partyEnded,
+    playbackFinished,
     endParty,
   };
 }
