@@ -185,10 +185,10 @@ export default function PartyRoom({
           onResume={resumeFromInteraction}
         />
       </div>
-      <p className="text-base font-semibold tracking-tight text-center mt-4">
+      <p className="text-base font-semibold tracking-tight text-center mt-3 md:mt-4">
         {currentTrack?.file_name ?? party.file_name}
       </p>
-      <div className="w-full max-w-sm mt-3">
+      <div className="w-full max-w-sm mt-2 md:mt-3">
         <AudioPlayer
           audioRef={audioRef}
           preloadAudioRef={preloadAudioRef}
