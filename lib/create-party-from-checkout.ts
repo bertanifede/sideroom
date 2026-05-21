@@ -33,7 +33,9 @@ export type CreatePartyResult =
  * The single source of truth for checkout-driven party creation, called by
  * both the Stripe webhook and the /api/checkout/finalize endpoint.
  *
- * - Payment-gated: creates nothing unless `session.payment_status === "paid"`.
+ * - Payment-gated: creates nothing unless the Stripe session is settled —
+ *   `payment_status` is `"paid"` (a payment cleared) or `"no_payment_required"`
+ *   (a 100%-off promotion code brought the total to $0).
  * - Idempotent: a party already created for the session is returned as-is.
  * - Race-safe: relies on the UNIQUE index on parties.stripe_session_id;
  *   the loser of a webhook-vs-finalize race returns the winner's party.
@@ -42,8 +44,14 @@ export async function createPartyFromCheckout(
   supabase: SupabaseClient,
   session: Stripe.Checkout.Session
 ): Promise<CreatePartyResult> {
-  // 1. Payment gate — Stripe is the source of truth.
-  if (session.payment_status !== "paid") {
+  // 1. Payment gate — Stripe is the source of truth. A settled session is
+  // either "paid" (money changed hands) or "no_payment_required" (the total
+  // was $0 because a 100%-off promotion code was applied). Anything else
+  // ("unpaid", etc.) must not create a party.
+  if (
+    session.payment_status !== "paid" &&
+    session.payment_status !== "no_payment_required"
+  ) {
     return { status: "not_paid" };
   }
 

@@ -68,6 +68,11 @@ export async function POST(request: Request) {
   const checkoutSession = await stripe.checkout.sessions.create({
     mode: "payment",
     line_items: [{ price: process.env.STRIPE_PRICE_ID!, quantity: 1 }],
+    // Show a promotion-code field on the Checkout page. Only codes that
+    // exist in Stripe work; a 100%-off code makes the total $0, which Stripe
+    // completes with payment_status "no_payment_required" (handled by
+    // createPartyFromCheckout).
+    allow_promotion_codes: true,
     success_url: `${baseUrl}/payment/success?session_id={CHECKOUT_SESSION_ID}`,
     cancel_url: `${baseUrl}/payment/cancel?session_id={CHECKOUT_SESSION_ID}`,
     metadata: { artist_id: user.id },

@@ -63,6 +63,27 @@ describe("createPartyFromCheckout", () => {
     expect(result.status).toBe("not_paid");
   });
 
+  it("creates the party for a $0 coupon session (no_payment_required)", async () => {
+    const client = makeFakeClient({
+      parties: [
+        { data: null, error: null }, // idempotency check
+        { data: null, error: null }, // invite-code collision check
+        { data: { id: "p1", invite_code: "iron-glow-abc" }, error: null }, // insert
+      ],
+      pending_checkouts: [
+        { data: { id: "pc1", artist_id: "artist1", party_data: PARTY_DATA }, error: null },
+        { data: null, error: null }, // delete
+      ],
+      tracks: [{ data: null, error: null }],
+    });
+    const result = await createPartyFromCheckout(
+      client,
+      session({ payment_status: "no_payment_required" })
+    );
+    expect(result.status).toBe("created");
+    expect(result).toMatchObject({ inviteCode: "iron-glow-abc" });
+  });
+
   it("returns the existing party when one already exists (idempotent)", async () => {
     const client = makeFakeClient({
       parties: [{ data: { id: "p1", invite_code: "iron-glow-abc" }, error: null }],
