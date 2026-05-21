@@ -95,6 +95,10 @@ export function usePlaybackSync({
   // Debug-only: previous heartbeat's guest currentTime, to log how much the
   // guest's playback actually advanced between heartbeats (liveness signal).
   const prevHbCtRef = useRef<number | null>(null);
+  // Mirrors `isPlaying` for synchronous reads inside the audio `pause` listener.
+  // Set false *before* any intentional pause so the route-change auto-resume
+  // can tell an external (iOS) pause apart from one we caused.
+  const isPlayingRef = useRef(false);
 
   const totalTracks = tracks.length;
   const currentTrack = tracks.find((t) => t.position === currentTrackPosition) ?? null;
@@ -143,6 +147,10 @@ export function usePlaybackSync({
   useEffect(() => {
     currentTrackPositionRef.current = currentTrackPosition;
   }, [currentTrackPosition]);
+
+  useEffect(() => {
+    isPlayingRef.current = isPlaying;
+  }, [isPlaying]);
 
   // Play a specific track
   const playTrack = useCallback(
@@ -360,6 +368,7 @@ export function usePlaybackSync({
           break;
         }
         case "PAUSE": {
+          isPlayingRef.current = false;
           audio.pause();
           audio.currentTime = event.position;
           // Clear any in-progress sync nudge — no heartbeats arrive while
@@ -470,6 +479,7 @@ export function usePlaybackSync({
     const handlePartyEnded = () => {
       const audio = audioRef.current;
       if (audio) {
+        isPlayingRef.current = false;
         audio.pause();
         setIsPlaying(false);
       }
@@ -484,6 +494,34 @@ export function usePlaybackSync({
       (channel as any).off?.("broadcast", { event: "party_ended" });
     };
   }, [channel, isArtist, getStreamProxyUrl]);
+
+  // Guest: an iOS audio-route change (e.g. AirPods connecting) pauses the
+  // <audio> element. Resume immediately on the pause event instead of waiting
+  // up to a heartbeat interval — but only for an *external* pause, never the
+  // host's PAUSE, the natural end of a track, or a track swap.
+  useEffect(() => {
+    if (isArtist) return;
+    const audio = audioRef.current;
+    if (!audio) return;
+
+    const onExternalPause = () => {
+      if (audio !== audioRef.current) return; // stale element mid-swap
+      if (!recoveryCompleteRef.current) return; // still recovering on join
+      if (!isPlayingRef.current) return; // an intentional pause (host / end)
+      if (audio.ended) return; // natural end of a track
+      if (!audio.paused) return; // already playing again
+      diag.log("sync", "external-pause-resume", {
+        aCt: Number(audio.currentTime.toFixed(2)),
+      });
+      audio.play().then(
+        () => setNeedsInteraction(false),
+        () => setNeedsInteraction(true)
+      );
+    };
+
+    audio.addEventListener("pause", onExternalPause);
+    return () => audio.removeEventListener("pause", onExternalPause);
+  }, [isArtist, swapCount]);
 
   // Guest recovery: restore playback from persisted state on mount
   useEffect(() => {

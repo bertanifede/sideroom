@@ -339,6 +339,88 @@ describe("usePlaybackSync hook", () => {
     expect(audio.playbackRate).toBe(1);
   });
 
+  it("guest: resumes immediately when the audio is paused externally (route change)", async () => {
+    const channel = createMockChannel();
+    const audio = createMockAudio();
+    audio.src = "https://cdn.example.com/stream.mp3";
+
+    renderWithAudio(audio, {
+      channel: channel as AnyChannel,
+      isArtist: false,
+      tracks: baseTracks,
+      partyId: "p1",
+      initialPlaybackState: null,
+      isConnected: true,
+    });
+    await act(async () => {});
+
+    // Get the guest playing via a heartbeat.
+    await act(async () => {
+      channel._trigger({
+        payload: { type: "HEARTBEAT", position: 0, track_position: 1, is_playing: true },
+      });
+    });
+    const playsBefore = (audio.play as ReturnType<typeof vi.fn>).mock.calls.length;
+
+    // Simulate iOS pausing the element on a route change, then the pause event.
+    audio.pause();
+    const pauseCalls = (audio.addEventListener as ReturnType<typeof vi.fn>).mock.calls.filter(
+      (c: unknown[]) => c[0] === "pause"
+    );
+    const onPause = pauseCalls[pauseCalls.length - 1][1] as () => void;
+    await act(async () => {
+      onPause();
+    });
+
+    // The external pause was auto-resumed.
+    expect((audio.play as ReturnType<typeof vi.fn>).mock.calls.length).toBe(
+      playsBefore + 1
+    );
+  });
+
+  it("guest: does NOT auto-resume after the host pauses (no resume loop)", async () => {
+    const channel = createMockChannel();
+    const audio = createMockAudio();
+    audio.src = "https://cdn.example.com/stream.mp3";
+
+    renderWithAudio(audio, {
+      channel: channel as AnyChannel,
+      isArtist: false,
+      tracks: baseTracks,
+      partyId: "p1",
+      initialPlaybackState: null,
+      isConnected: true,
+    });
+    await act(async () => {});
+
+    // Get the guest playing.
+    await act(async () => {
+      channel._trigger({
+        payload: { type: "HEARTBEAT", position: 0, track_position: 1, is_playing: true },
+      });
+    });
+
+    // Host pauses the party.
+    await act(async () => {
+      channel._trigger({ payload: { type: "PAUSE", position: 12 } });
+    });
+    const playsBefore = (audio.play as ReturnType<typeof vi.fn>).mock.calls.length;
+
+    // The host's pause() fires the audio "pause" event — the listener must NOT
+    // resume it (that would fight the host and create a play/pause loop).
+    const pauseCalls = (audio.addEventListener as ReturnType<typeof vi.fn>).mock.calls.filter(
+      (c: unknown[]) => c[0] === "pause"
+    );
+    const onPause = pauseCalls[pauseCalls.length - 1][1] as () => void;
+    await act(async () => {
+      onPause();
+    });
+
+    expect((audio.play as ReturnType<typeof vi.fn>).mock.calls.length).toBe(
+      playsBefore
+    );
+  });
+
   it("guest HEARTBEAT: leaves playback untouched within the dead zone", async () => {
     const channel = createMockChannel();
     const audio = createMockAudio();
