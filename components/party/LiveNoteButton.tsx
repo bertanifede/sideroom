@@ -73,7 +73,7 @@ export default function LiveNoteButton({
         }}
         placeholder="Note at this moment..."
         autoFocus
-        className="flex-1 bg-[var(--party-fg)]/5 border border-[var(--party-fg)]/10 rounded-full px-3 py-1.5 text-xs text-[var(--party-fg)] placeholder:text-[var(--party-fg)]/30 outline-none"
+        className="flex-1 bg-[var(--party-fg)]/5 border border-[var(--party-fg)]/10 rounded-full px-3 py-1.5 text-base md:text-xs text-[var(--party-fg)] placeholder:text-[var(--party-fg)]/30 outline-none"
       />
       <button
         onClick={handleSubmit}

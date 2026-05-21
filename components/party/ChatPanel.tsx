@@ -146,7 +146,7 @@ export default function ChatPanel({
             disabled={disabled}
             rows={1}
             style={{ maxHeight: maxInputH }}
-            className="w-full pl-3.5 pr-10 py-2.5 bg-transparent text-[var(--party-fg)] text-sm
+            className="w-full pl-3.5 pr-10 py-2.5 bg-transparent text-[var(--party-fg)] text-base md:text-sm
                        placeholder-[var(--party-fg)]/40 focus:outline-none focus:ring-0
                        disabled:cursor-not-allowed resize-none overflow-y-auto
                        [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]"
