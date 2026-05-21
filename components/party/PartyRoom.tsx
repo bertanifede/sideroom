@@ -211,7 +211,7 @@ export default function PartyRoom({
               {"Tap End Party when you're ready."}
             </>
           ) : (
-            "The set has finished — say goodbye in chat."
+            "Audio ended — say goodbye in the chat."
           )}
         </p>
       )}
