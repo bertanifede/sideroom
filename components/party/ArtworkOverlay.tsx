@@ -48,7 +48,7 @@ export default function ArtworkOverlay({
           style={{ backgroundColor: "rgba(0,0,0,0.45)" }}
         >
           <span className="text-white/90 text-sm font-medium">
-            Set finished — all tracks played
+            All tracks played
           </span>
         </div>
       )}
