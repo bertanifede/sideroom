@@ -181,6 +181,8 @@ export default function PartyRoom({
           isLoading={isLoadingPlay}
           onTogglePlay={isPlaying ? pause : handlePlay}
           playbackFinished={playbackFinished}
+          needsResume={!isArtist && needsInteraction}
+          onResume={resumeFromInteraction}
         />
       </div>
       <p className="text-base font-semibold tracking-tight text-center mt-4">
@@ -198,7 +200,6 @@ export default function PartyRoom({
           onPlay={handlePlay}
           onPause={pause}
           needsInteraction={needsInteraction}
-          onResume={resumeFromInteraction}
         />
       </div>
       {playbackFinished && !partyEnded && (

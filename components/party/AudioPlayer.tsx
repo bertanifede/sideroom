@@ -16,7 +16,6 @@ interface AudioPlayerProps {
   currentTrackPosition?: number;
   totalTracks?: number;
   needsInteraction?: boolean;
-  onResume?: () => void;
 }
 
 function formatTime(seconds: number): string {
@@ -40,7 +39,6 @@ export default function AudioPlayer({
   currentTrackPosition,
   totalTracks,
   needsInteraction,
-  onResume,
 }: AudioPlayerProps) {
   // Keep pitch stable when playbackRate is nudged for sync correction.
   useEffect(() => {
@@ -93,19 +91,6 @@ export default function AudioPlayer({
         <div className="flex items-center justify-between">
           <span className="text-xs text-[var(--party-fg)]/50">{formatTime(currentTime)}</span>
           <span className="text-xs text-[var(--party-fg)]/50">{formatTime(duration)}</span>
-        </div>
-      )}
-
-      {/* Guest: autoplay blocked — tap to listen */}
-      {!isArtist && needsInteraction && onResume && (
-        <div className="flex items-center justify-center mt-4">
-          <button
-            onClick={onResume}
-            className="px-4 py-2 bg-[var(--party-accent)] text-[var(--party-bg)] rounded-full text-sm font-medium
-                       hover:opacity-80 transition-opacity animate-pulse"
-          >
-            Tap to start listening
-          </button>
         </div>
       )}
 

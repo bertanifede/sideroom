@@ -99,6 +99,11 @@ export function usePlaybackSync({
   // Set false *before* any intentional pause so the route-change auto-resume
   // can tell an external (iOS) pause apart from one we caused.
   const isPlayingRef = useRef(false);
+  // Latest host position from a heartbeat — used to re-sync a manual resume.
+  const lastHostPosRef = useRef<{ position: number; at: number } | null>(null);
+  // Timestamp of the last auto-resume attempt — throttles the pause listener so
+  // a resume that instantly bounces back to paused can't spin in a loop.
+  const lastResumeAttemptRef = useRef(0);
 
   const totalTracks = tracks.length;
   const currentTrack = tracks.find((t) => t.position === currentTrackPosition) ?? null;
@@ -383,6 +388,7 @@ export function usePlaybackSync({
           break;
         }
         case "HEARTBEAT": {
+          lastHostPosRef.current = { position: event.position, at: Date.now() };
           // Track change recovery: if artist is on a different track, switch
           if (event.track_position && event.track_position !== currentTrackPositionRef.current) {
             const preload = preloadAudioRef.current;
@@ -510,6 +516,15 @@ export function usePlaybackSync({
       if (!isPlayingRef.current) return; // an intentional pause (host / end)
       if (audio.ended) return; // natural end of a track
       if (!audio.paused) return; // already playing again
+      // Throttle: if a resume was attempted in the last 2s the element is
+      // bouncing straight back to paused — stop auto-retrying and surface the
+      // manual "tap to resume" control instead of looping.
+      if (Date.now() - lastResumeAttemptRef.current < 2000) {
+        diag.log("sync", "external-pause-throttled", {});
+        setNeedsInteraction(true);
+        return;
+      }
+      lastResumeAttemptRef.current = Date.now();
       diag.log("sync", "external-pause-resume", {
         aCt: Number(audio.currentTime.toFixed(2)),
       });
@@ -794,6 +809,16 @@ export function usePlaybackSync({
       const url = getStreamProxyUrl(currentTrackPositionRef.current);
       audio.src = url;
       setAudioUrl(url);
+    }
+
+    // Re-sync to where the host is now, so a manual resume doesn't land
+    // seconds behind (which would otherwise trigger a corrective hard seek).
+    const hostPos = lastHostPosRef.current;
+    if (hostPos && Date.now() - hostPos.at < 15000) {
+      const target = hostPos.position + (Date.now() - hostPos.at) / 1000;
+      audio.currentTime = audio.duration
+        ? Math.min(target, audio.duration)
+        : target;
     }
 
     try {

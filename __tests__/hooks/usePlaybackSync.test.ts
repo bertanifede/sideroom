@@ -421,6 +421,82 @@ describe("usePlaybackSync hook", () => {
     );
   });
 
+  it("guest: throttles rapid external pauses instead of looping", async () => {
+    const channel = createMockChannel();
+    const audio = createMockAudio();
+    audio.src = "https://cdn.example.com/stream.mp3";
+
+    renderWithAudio(audio, {
+      channel: channel as AnyChannel,
+      isArtist: false,
+      tracks: baseTracks,
+      partyId: "p1",
+      initialPlaybackState: null,
+      isConnected: true,
+    });
+    await act(async () => {});
+    await act(async () => {
+      channel._trigger({
+        payload: { type: "HEARTBEAT", position: 0, track_position: 1, is_playing: true },
+      });
+    });
+
+    const pauseCalls = (audio.addEventListener as ReturnType<typeof vi.fn>).mock.calls.filter(
+      (c: unknown[]) => c[0] === "pause"
+    );
+    const onPause = pauseCalls[pauseCalls.length - 1][1] as () => void;
+
+    // First external pause → one resume attempt.
+    audio.pause();
+    await act(async () => {
+      onPause();
+    });
+    const afterFirst = (audio.play as ReturnType<typeof vi.fn>).mock.calls.length;
+
+    // It bounces straight back to paused → a second pause inside the throttle
+    // window must NOT trigger another resume (no loop).
+    audio.pause();
+    await act(async () => {
+      onPause();
+    });
+    expect((audio.play as ReturnType<typeof vi.fn>).mock.calls.length).toBe(
+      afterFirst
+    );
+  });
+
+  it("guest: resumeFromInteraction re-syncs to the host's position", async () => {
+    const channel = createMockChannel();
+    const audio = createMockAudio();
+    audio.src = "https://cdn.example.com/stream.mp3";
+
+    const { result } = renderWithAudio(audio, {
+      channel: channel as AnyChannel,
+      isArtist: false,
+      tracks: baseTracks,
+      partyId: "p1",
+      initialPlaybackState: null,
+      isConnected: true,
+    });
+    await act(async () => {});
+
+    // Heartbeat at host position 5 — drift is within tolerance, so the
+    // heartbeat itself does not seek.
+    await act(async () => {
+      channel._trigger({
+        payload: { type: "HEARTBEAT", position: 5, track_position: 1, is_playing: true },
+      });
+    });
+    expect(audio.currentTime).toBe(0);
+
+    await act(async () => {
+      await result.current.resumeFromInteraction();
+    });
+
+    // The manual resume jumped to roughly the host's current position.
+    expect(audio.currentTime).toBeGreaterThanOrEqual(5);
+    expect(audio.currentTime).toBeLessThan(6);
+  });
+
   it("guest HEARTBEAT: leaves playback untouched within the dead zone", async () => {
     const channel = createMockChannel();
     const audio = createMockAudio();

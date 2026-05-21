@@ -8,6 +8,8 @@ interface ArtworkOverlayProps {
   isLoading?: boolean;
   onTogglePlay?: () => void;
   playbackFinished?: boolean;
+  needsResume?: boolean;
+  onResume?: () => void;
 }
 
 export default function ArtworkOverlay({
@@ -20,6 +22,8 @@ export default function ArtworkOverlay({
   isLoading,
   onTogglePlay,
   playbackFinished,
+  needsResume,
+  onResume,
 }: ArtworkOverlayProps) {
   return (
     <div className="relative mb-2">
@@ -77,6 +81,21 @@ export default function ArtworkOverlay({
               </svg>
             )}
           </span>
+        </button>
+      )}
+      {needsResume && (
+        <button
+          onClick={onResume}
+          aria-label="Resume playback"
+          className="absolute inset-0 flex flex-col items-center justify-center gap-3 rounded-2xl cursor-pointer"
+          style={{ backgroundColor: "rgba(0,0,0,0.6)" }}
+        >
+          <span className="w-16 h-16 rounded-full bg-white/25 backdrop-blur-sm flex items-center justify-center animate-pulse">
+            <svg width="28" height="28" viewBox="0 0 24 24" fill="white">
+              <path d="M8 5.14v13.72a1 1 0 0 0 1.5.86l11-6.86a1 1 0 0 0 0-1.72l-11-6.86a1 1 0 0 0-1.5.86z" />
+            </svg>
+          </span>
+          <span className="text-white text-sm font-medium">Tap to resume</span>
         </button>
       )}
     </div>
