@@ -21,6 +21,7 @@ export function useAudioDiagnostics(
       diag.log("audio", "waiting", { t: at(), readyState: audio.readyState });
     };
     const onPlaying = () => {
+      diag.log("audio", "playing", { t: at(), paused: audio.paused });
       if (waitingAt > 0) {
         const stallMs = performance.now() - waitingAt;
         diag.recordStall(stallMs);
@@ -28,6 +29,13 @@ export function useAudioDiagnostics(
         waitingAt = 0;
       }
     };
+    // pause / play / suspend catch iOS audio-route interruptions (e.g. AirPods
+    // connecting) that the sync code's `audio.paused` check can otherwise miss.
+    const onPause = () =>
+      diag.log("audio", "pause", { t: at(), readyState: audio.readyState });
+    const onPlay = () => diag.log("audio", "play", { t: at() });
+    const onSuspend = () =>
+      diag.log("audio", "suspend", { t: at(), readyState: audio.readyState });
     const onStalled = () => diag.log("audio", "stalled", { t: at() });
     const onSeeking = () => diag.log("audio", "seeking", { t: at() });
     const onSeeked = () => diag.log("audio", "seeked", { t: at() });
@@ -36,6 +44,9 @@ export function useAudioDiagnostics(
 
     audio.addEventListener("waiting", onWaiting);
     audio.addEventListener("playing", onPlaying);
+    audio.addEventListener("pause", onPause);
+    audio.addEventListener("play", onPlay);
+    audio.addEventListener("suspend", onSuspend);
     audio.addEventListener("stalled", onStalled);
     audio.addEventListener("seeking", onSeeking);
     audio.addEventListener("seeked", onSeeked);
@@ -45,6 +56,9 @@ export function useAudioDiagnostics(
     return () => {
       audio.removeEventListener("waiting", onWaiting);
       audio.removeEventListener("playing", onPlaying);
+      audio.removeEventListener("pause", onPause);
+      audio.removeEventListener("play", onPlay);
+      audio.removeEventListener("suspend", onSuspend);
       audio.removeEventListener("stalled", onStalled);
       audio.removeEventListener("seeking", onSeeking);
       audio.removeEventListener("seeked", onSeeked);

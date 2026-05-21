@@ -92,6 +92,9 @@ export function usePlaybackSync({
   const recoveryCompleteRef = useRef(false);
   const currentTrackPositionRef = useRef(currentTrackPosition);
   const errorTimestampsRef = useRef<number[]>([]);
+  // Debug-only: previous heartbeat's guest currentTime, to log how much the
+  // guest's playback actually advanced between heartbeats (liveness signal).
+  const prevHbCtRef = useRef<number | null>(null);
 
   const totalTracks = tracks.length;
   const currentTrack = tracks.find((t) => t.position === currentTrackPosition) ?? null;
@@ -413,27 +416,40 @@ export function usePlaybackSync({
                 setNeedsInteraction(true);
               }
             }
+            prevHbCtRef.current = null;
             break;
           }
 
           // If artist says playing but we're paused, resume
           if (event.is_playing && audio.paused) {
+            diag.log("sync", "resume-attempt", {
+              aCt: Number(audio.currentTime.toFixed(2)),
+            });
             try {
               await audio.play();
               setIsPlaying(true);
-            } catch {
+              diag.log("sync", "resume-ok", {});
+            } catch (e) {
               setNeedsInteraction(true);
+              diag.log("sync", "resume-failed", { err: String(e) });
             }
           }
 
           const delta = event.position - audio.currentTime;
           const correction = decideCorrection(delta);
+          const ctNow = audio.currentTime;
+          const ctAdv =
+            prevHbCtRef.current != null
+              ? Number((ctNow - prevHbCtRef.current).toFixed(2))
+              : null;
+          prevHbCtRef.current = ctNow;
           diag.recordHeartbeat(Math.abs(delta), correction.action);
           diag.log("sync", "heartbeat", {
             delta: Number(delta.toFixed(2)),
             action: correction.action,
             pos: Number(event.position.toFixed(2)),
-            aCt: Number(audio.currentTime.toFixed(2)),
+            aCt: Number(ctNow.toFixed(2)),
+            ctAdv,
             aPaused: audio.paused,
             pCt: preloadAudioRef.current
               ? Number(preloadAudioRef.current.currentTime.toFixed(2))
