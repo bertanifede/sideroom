@@ -95,7 +95,8 @@ When the artist finishes the create-party wizard:
 1. The uploaded track/cover file paths and all party settings are bundled
    into a `party_data` JSON blob.
 2. A Stripe Checkout Session is created (`success_url` → `/payment/success`,
-   `metadata.artist_id` set to the artist).
+   `metadata.artist_id` set to the artist, `allow_promotion_codes` enabled so
+   a 100%-off Stripe promotion code can be redeemed at checkout).
 3. A `pending_checkouts` row is written. **No `parties` row exists yet.**
 4. The artist is redirected to Stripe.
 
@@ -113,9 +114,10 @@ pending_checkouts
 The party is created by one shared function — `createPartyFromCheckout`
 (`lib/create-party-from-checkout.ts`). It is:
 
-- **Payment-gated** — creates nothing unless the Stripe session's
-  `payment_status === "paid"`. Stripe is the source of truth; the flow
-  never assumes payment from context.
+- **Payment-gated** — creates nothing unless the Stripe session is settled:
+  `payment_status` is `"paid"` (a payment cleared) or `"no_payment_required"`
+  (a 100%-off promotion code brought the total to $0). Stripe is the source
+  of truth; the flow never assumes payment from context.
 - **Idempotent** — first checks for an existing party by
   `stripe_session_id`; if found, returns it.
 - **Race-safe** — `parties.stripe_session_id` has a `UNIQUE` index. If two
